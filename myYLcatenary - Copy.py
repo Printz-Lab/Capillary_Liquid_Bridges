@@ -3,7 +3,7 @@ import numpy as np
 import os
 import csv
 from scipy.optimize import curve_fit
-
+#fixed something
 # Define left and right catenary functions
 def left_catenary(y, a, y0, c):
     """Catenary curve for left edge (opens to the right)"""
