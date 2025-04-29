@@ -1,7 +1,7 @@
 import cv2
 import os
 import glob
-
+import numpy as np
 # Define the input folder and output folder
 input_folder = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\Anton's snapshots\Snapshots\APTMS Top\aa"  # Replace with the path to your folder containing .tif files
 output_folder = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\Anton's snapshots\APTMS Filtered" # Replace with the folder where you want to save the edge images
