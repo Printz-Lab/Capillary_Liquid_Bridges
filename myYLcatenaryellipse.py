@@ -3,7 +3,6 @@ import numpy as np
 import os
 import csv
 from scipy.optimize import curve_fit
-from sklearn.linear_model import RANSACRegressor
 
 # Define left and right catenary functions
 def left_catenary(y, a, y0, c):
@@ -30,6 +29,25 @@ def select_roi(image):
     cv2.destroyWindow("Select ROI")
     return roi
 
+def residual_filter(x_data, y_data, model_func, initial_params, n_std=2):
+    """Simple residual-based outlier filtering"""
+    try:
+        # Initial fit to identify outliers
+        params, _ = curve_fit(model_func, y_data, x_data, p0=initial_params, maxfev=2000)
+        
+        # Calculate residuals
+        predicted = model_func(y_data, *params)
+        residuals = x_data - predicted
+        
+        # Filter points within n_std standard deviations
+        residual_std = np.std(residuals)
+        mask = np.abs(residuals) <= n_std * residual_std
+        
+        return x_data[mask], y_data[mask]
+    except:
+        # Fallback if initial fit fails
+        return x_data, y_data
+
 def calculate_contact_angle(curve, y_pos, rotation_matrix):
     """Calculate angle for both catenary and ellipse"""
     if curve['type'] == 'catenary':
@@ -49,54 +67,20 @@ def calculate_contact_angle(curve, y_pos, rotation_matrix):
     angle = np.arctan2(rotated_vec[1], rotated_vec[0])
     return np.degrees(angle) % 180
 
-class curve_fit_estimator:
-    def __init__(self, func):
-        self.func = func
-        
-    def fit(self, X, y):
-        try:
-            self.coeffs_, _ = curve_fit(self.func, X.ravel(), y, maxfev=2000)
-        except:
-            self.coeffs_ = np.zeros(3 if 'catenary' in self.func.__name__ else 4)
-        return self  # Required for RANSAC compatibility
-    
-    def predict(self, X):
-        return self.func(X.ravel(), *self.coeffs_)
-    
-    def score(self, X, y):
-        return 1.0  # Dummy score to satisfy RANSAC requirements
-
-def ransac_filter(x_data, y_data, model_func, initial_params, n_trials=100):
-    """Updated for scikit-learn >= 0.24"""
-    if len(x_data) < 10:
-        return x_data, y_data
-        
-    model = RANSACRegressor(
-        estimator=curve_fit_estimator(model_func),  # Changed parameter name
-        min_samples=0.6,
-        residual_threshold=np.std(x_data)/2,
-        max_trials=n_trials,
-        random_state=42
-    )
-    
-    try:
-        model.fit(y_data.reshape(-1, 1), x_data)
-        return x_data[model.inlier_mask_], y_data[model.inlier_mask_]
-    except Exception as e:
-        print(f"RANSAC error: {str(e)}")
-        return x_data, y_data
-
 def get_initial_guesses(x_data, y_data, side, roi_x, roi_width):
     y_center = np.mean(y_data)
-    x_center = np.mean(x_data)
-    # Catenary
-    a_cat = roi_width * 0.1  # Initial sag estimate
+    y_range = np.max(y_data) - np.min(y_data)
+    
+    # Catenary parameters (unchanged)
+    a_cat = roi_width * 0.1
     c_cat = roi_x + (0.2 * roi_width if side == "left" else 0.8 * roi_width)
-    # Ellipse
-    h_ell = roi_x + (0.3 * roi_width if side == "left" else 0.7 * roi_width)
+    
+    # Improved ellipse parameters
+    h_ell = roi_x + (0.4 * roi_width if side == "left" else 0.6 * roi_width)
     k_ell = y_center
-    a_ell = 0.2 * roi_width  # Semi-major axis
-    b_ell = 0.5 * (np.max(y_data) - np.min(y_data))  # Semi-minor axis
+    a_ell = 0.15 * roi_width  # Reduced initial major axis
+    b_ell = 0.4 * y_range     # More conservative minor axis
+    
     return {
         'catenary': [a_cat, y_center, c_cat],
         'ellipse': [h_ell, k_ell, a_ell, b_ell]
@@ -117,20 +101,23 @@ def get_bounds(side, roi_x, roi_width, model_type):
              np.inf, roi_width, 2*roi_width]
         )
 
-
 def iterative_fit(x_data, y_data, model_func, initial_params, bounds, max_iter=5):
     """Robust iterative fitting with adaptive learning"""
     best_params = initial_params.copy()
     best_rmse = np.inf
+    success = False  # Track if any iteration succeeded
     
     for i in range(max_iter):
         try:
-             # Check parameter feasibility before fitting
+            # Check parameter feasibility
             if not np.all(np.logical_and(
                 np.array(bounds[0]) <= best_params,
                 best_params <= np.array(bounds[1])
             )):
-                raise ValueError("Initial parameters out of bounds")
+                print(f"Iteration {i+1}: Initial params out of bounds")
+                continue
+                
+            # Perform curve fitting
             params, _ = curve_fit(
                 model_func, y_data, x_data,
                 p0=best_params,
@@ -141,24 +128,29 @@ def iterative_fit(x_data, y_data, model_func, initial_params, bounds, max_iter=5
                 xtol=1e-4
             )
             
+            # Calculate RMSE
             residuals = x_data - model_func(y_data, *params)
             current_rmse = np.sqrt(np.mean(residuals**2))
             
             if current_rmse < best_rmse:
                 best_rmse = current_rmse
                 best_params = params
+                success = True
                 print(f"Iteration {i+1}: RMSE improved to {best_rmse:.2f}")
 
-                # Dynamically adjust bounds
+                # Adjust bounds conservatively
                 bounds = (
-                    np.clip(params*0.8, [b*0.9 for b in bounds[0]], [b*1.1 for b in bounds[1]]),
-                    np.clip(params*1.2, [b*0.9 for b in bounds[0]], [b*1.1 for b in bounds[1]])
+                    np.clip(params*0.9, [b*0.95 for b in bounds[0]], [b*1.05 for b in bounds[1]]),
+                    np.clip(params*1.1, [b*0.95 for b in bounds[0]], [b*1.05 for b in bounds[1]])
                 )
                 
         except Exception as e:
             print(f"Iteration {i+1} failed: {str(e)}")
             continue
             
+    if not success:
+        raise RuntimeError("All iterations failed to converge")
+        
     return best_params, best_rmse
 
 def show_fit_debug(image, x_data, y_data, fits, roi):
@@ -188,8 +180,6 @@ def show_fit_debug(image, x_data, y_data, fits, roi):
     cv2.imshow("Fitting Debug", debug_img)
     cv2.waitKey(100)
 
-
-
 def process_image(image_path):
     image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if image is None:
@@ -207,7 +197,7 @@ def process_image(image_path):
     # Edge detection
     roi_img = image[y_roi:y_roi+h, x_roi:x_roi+w]
     blurred = cv2.GaussianBlur(roi_img, (5, 5), 0)
-    edges = cv2.Canny(blurred, 30, 100)
+    edges = cv2.Canny(blurred, 50, 100)
     
     edge_points = np.column_stack(np.where(edges > 0))
     if len(edge_points) < 10:
@@ -246,25 +236,22 @@ def process_image(image_path):
                    left_ellipse if (side == 'left' and model_type == 'ellipse') else \
                    right_ellipse
 
-            # Robust RANSAC filtering
-            try:
-                x_filt, y_filt = ransac_filter(xs, ys, func, guesses[model_type])
-                print(f"After RANSAC: {len(x_filt)}/{len(xs)} points remain")
-                
-                if len(x_filt) < 20:
-                    print("Insufficient points for fitting")
-                    continue
-            except Exception as e:
-                print(f"RANSAC failed: {str(e)}")
+            # Apply residual-based filtering
+            x_filt, y_filt = residual_filter(xs, ys, func, guesses[model_type])
+            print(f"After residual filtering: {len(x_filt)}/{len(xs)} points remain")
+            
+            if len(x_filt) < 20:
+                print("Insufficient points for fitting")
                 continue
                 
             # Get adaptive bounds
             bounds = get_bounds(side, x_roi, w, model_type)
             print(f"Using bounds:\nLower: {bounds[0]}\nUpper: {bounds[1]}")
             
+            # In the model fitting loop:
             try:
                 params, rmse = iterative_fit(x_filt, y_filt, func,
-                                           guesses[model_type], bounds)
+                                            guesses[model_type], bounds)
                 print(f"Successful {model_type} fit!")
                 print(f"Parameters: {params}")
                 print(f"RMSE: {rmse:.2f} pixels")
@@ -277,11 +264,11 @@ def process_image(image_path):
                     'points': (x_filt, y_filt)
                 })
                 
-                # Visual feedback with proper ROI coordinates
-                show_fit_debug(image, x_filt, y_filt, models, roi)
-                
+            except RuntimeError as e:
+                print(f"{model_type} fitting failed: {str(e)}")
+                continue
             except Exception as e:
-                print(f"Final fitting failed: {str(e)}")
+                print(f"Unexpected error: {str(e)}")
                 continue
 
         if models:
@@ -307,8 +294,7 @@ def process_image(image_path):
             except Exception as e:
                 print(f"Angle calculation failed: {str(e)}")
 
-
-    # Save results
+    # Save results (same as before)
     output_dir = os.path.join(os.path.dirname(image_path), "analyzed_results")
     os.makedirs(output_dir, exist_ok=True)
     base_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -323,27 +309,25 @@ def process_image(image_path):
         ])
         
         for data in output_data:
-            # Check if 'all_models' exists and is iterable
-            models_to_report = data.get('all_models', [])
-            if not isinstance(models_to_report, list):
-                models_to_report = []
-                
-            for model in models_to_report:
-                # Add null checks for coefficients
-                coeffs = model.get('coeffs', [])
-                if len(coeffs) < 4:  # Pad with N/A for ellipse params if needed
-                    coeffs = list(coeffs) + ['N/A']*(4-len(coeffs))
-                writer.writerow([
-                    os.path.basename(image_path),
-                    data["side"],
-                    model['type'],
-                    f"{model['rmse']:.4f}",
-                    *model['coeffs'],
-                    f"{data.get('top_angle', 'N/A')}",
-                    f"{data.get('bottom_angle', 'N/A')}",
-                    *data['top_point'],
-                    *data['bottom_point']
-                ])
+            model = data.get('model')
+            if model is None:
+                continue
+            
+            coeffs = model.get('coeffs', [])
+            if len(coeffs) < 4:
+                coeffs = list(coeffs) + ['N/A'] * (4 - len(coeffs))
+            
+            writer.writerow([
+                os.path.basename(image_path),
+                data["side"],
+                model['type'],
+                f"{model['rmse']:.4f}",
+                *coeffs,
+                f"{data.get('top_angle', 'N/A')}",
+                f"{data.get('bottom_angle', 'N/A')}",
+                *data['top_point'],
+                *data['bottom_point']
+            ])
     
     cv2.imwrite(os.path.join(output_dir, f"{base_name}_processed.png"), output)
     cv2.imshow("Results", output)
