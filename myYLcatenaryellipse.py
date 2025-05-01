@@ -3,6 +3,8 @@ import numpy as np
 import os
 import csv
 from scipy.optimize import curve_fit
+import tkinter as tk
+from tkinter import filedialog
 
 # Define left and right catenary functions
 def left_catenary(y, a, y0, c):
@@ -66,6 +68,54 @@ def calculate_contact_angle(curve, y_pos, rotation_matrix):
     rotated_vec = np.dot(rotation_matrix, direction_vec)
     angle = np.arctan2(rotated_vec[1], rotated_vec[0])
     return np.degrees(angle) % 180
+
+import numpy as np
+
+def ellipse_parametric_points(xc, yc, a, b, angle_deg, num_points=1000):
+    theta = np.deg2rad(angle_deg)
+    t = np.linspace(0, 2*np.pi, num_points)
+    cos_t = np.cos(t)
+    sin_t = np.sin(t)
+
+    x = xc + a * cos_t * np.cos(theta) - b * sin_t * np.sin(theta)
+    y = yc + a * cos_t * np.sin(theta) + b * sin_t * np.cos(theta)
+    return x, y, t
+
+def find_top_bottom_intersections(x, y, t, roi_top, roi_bottom):
+    # Get index closest to top and bottom y-values
+    idx_top = np.argmin(np.abs(y - roi_top))
+    idx_bottom = np.argmin(np.abs(y - roi_bottom))
+    return (x[idx_top], y[idx_top], t[idx_top]), (x[idx_bottom], y[idx_bottom], t[idx_bottom])
+
+def ellipse_tangent_angle(a, b, t_val, angle_deg):
+    # Derivatives of x(t) and y(t)
+    theta = np.deg2rad(angle_deg)
+    dx_dt = -a * np.sin(t_val) * np.cos(theta) - b * np.cos(t_val) * np.sin(theta)
+    dy_dt = -a * np.sin(t_val) * np.sin(theta) + b * np.cos(t_val) * np.cos(theta)
+    angle_rad = np.arctan2(dy_dt, dx_dt)
+    return np.rad2deg(angle_rad) % 180
+def compute_cv2_ellipse_rmse(x_data, y_data, xc, yc, major, minor, angle_deg, num_samples=500):
+    # Parametric ellipse points
+    a, b = major / 2, minor / 2
+    theta = np.deg2rad(angle_deg)
+    t = np.linspace(0, 2*np.pi, num_samples)
+    cos_t, sin_t = np.cos(t), np.sin(t)
+
+    x_ellipse = xc + a * cos_t * np.cos(theta) - b * sin_t * np.sin(theta)
+    y_ellipse = yc + a * cos_t * np.sin(theta) + b * sin_t * np.cos(theta)
+
+    ellipse_points = np.column_stack((x_ellipse, y_ellipse))
+    data_points = np.column_stack((x_data, y_data))
+
+    # Find nearest ellipse point for each data point
+    diffs = data_points[:, np.newaxis, :] - ellipse_points[np.newaxis, :, :]
+    dists = np.linalg.norm(diffs, axis=2)  # Shape (num_data_points, num_ellipse_points)
+    min_dists = np.min(dists, axis=1)
+
+    rmse = np.sqrt(np.mean(min_dists**2))
+    return rmse
+
+
 
 def get_initial_guesses(x_data, y_data, side, roi_x, roi_width):
     y_center = np.mean(y_data)
@@ -139,33 +189,6 @@ def iterative_fit(x_data, y_data, model_func, initial_params, bounds, max_iter=5
             
     return best_params, best_rmse
 
-def show_fit_debug(image, x_data, y_data, fits, roi):
-    """Fixed coordinate system visualization"""
-    x_roi, y_roi, w, h = roi
-    debug_img = cv2.cvtColor(image[y_roi:y_roi+h, x_roi:x_roi+w], cv2.COLOR_GRAY2BGR)
-    
-    # Convert absolute coordinates to ROI-relative
-    rel_x = x_data - x_roi
-    rel_y = y_data - y_roi
-    
-    for x, y in zip(rel_x, rel_y):
-        cv2.circle(debug_img, (int(x), int(y)), 2, (0,0,255), -1)
-        
-    # Plot fits in ROI coordinates
-    y_range = np.linspace(0, h, 100)
-    colors = [(0,255,0), (255,0,0)]
-    
-    for fit, color in zip(fits, colors):
-        try:
-            x_vals = fit['func'](y_range + y_roi, *fit['coeffs']) - x_roi
-            pts = np.column_stack([x_vals, y_range]).astype(int)
-            cv2.polylines(debug_img, [pts], False, color, 2)
-        except:
-            continue
-            
-    cv2.imshow("Fitting Debug", debug_img)
-    cv2.waitKey(100)
-
 def process_image(image_path):
     image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if image is None:
@@ -208,9 +231,9 @@ def process_image(image_path):
             
         xs, ys = points[:, 0], points[:, 1]
         print(f"\nProcessing {side} side with {len(xs)} points")
-        # Plot xs, ys points on the output image in pink
-        for x, y in zip(xs, ys):
-            cv2.circle(output, (int(x), int(y)), 2, (255, 105, 180), -1)  # Pink color (BGR: 180, 105, 255)
+        # # Plot xs, ys points on the output image in pink
+        # for x, y in zip(xs, ys):
+        #     cv2.circle(output, (int(x), int(y)), 2, (255, 105, 180), -1)  # Pink color (BGR: 180, 105, 255)
         guesses = get_initial_guesses(xs, ys, side, x_roi, w)
         if not guesses:
             continue
@@ -226,62 +249,105 @@ def process_image(image_path):
 
             # Apply residual-based filtering
             x_filt, y_filt = residual_filter(xs, ys, func, guesses[model_type])
+            for x, y in zip(x_filt, y_filt):
+                cv2.circle(output, (int(x), int(y)), 2, (180, 105, 255), -1)
+            pts_for_cv2 = np.column_stack((x_filt, y_filt)).astype(np.int32)
             print(f"After residual filtering: {len(x_filt)}/{len(xs)} points remain")
             
             if len(x_filt) < 20:
                 print("Insufficient points for fitting")
                 continue
+            if model_type == 'ellipse':
+                if len(pts_for_cv2) >= 5:  # cv2.fitEllipse requires at least 5 points
+                    ellipse = cv2.fitEllipse(pts_for_cv2)
+                    (xc, yc), (major, minor), angle = ellipse
+                    print(f"OpenCV Ellipse Fit: center=({xc:.1f}, {yc:.1f}), axes=({major:.1f}, {minor:.1f}), angle={angle:.1f}")
+                    rmse = compute_cv2_ellipse_rmse(x_filt, y_filt, xc, yc, major, minor, angle)
+                    models.append({
+                        'type': 'cv2_ellipse',
+                        'func': None,
+                        'coeffs': (xc, yc, major, minor, angle),
+                        'rmse': rmse,
+                        'points': (x_filt, y_filt)
+                    })
+                    print(f"RMSE (cv2 ellipse): {rmse:.2f} pixels")
+
+            if model_type == 'catenary':
+                # Get adaptive bounds
+                bounds = get_bounds(side, x_roi, w, model_type)
+                print(f"Using bounds:\nLower: {bounds[0]}\nUpper: {bounds[1]}")
                 
-            # Get adaptive bounds
-            bounds = get_bounds(side, x_roi, w, model_type)
-            print(f"Using bounds:\nLower: {bounds[0]}\nUpper: {bounds[1]}")
-            
-            try:
-                params, rmse = iterative_fit(x_filt, y_filt, func,
-                                            guesses[model_type], bounds)
-                print(f"Successful {model_type} fit!")
-                print(f"Parameters: {params}")
-                print(f"RMSE: {rmse:.2f} pixels")
-                
-                models.append({
-                    'type': model_type,
-                    'func': func,
-                    'coeffs': params,
-                    'rmse': rmse,
-                    'points': (x_filt, y_filt)
-                })
-                
-            except RuntimeError as e:
-                print(f"{model_type} fitting failed: {str(e)}")
-                continue
-            except Exception as e:
-                print(f"Unexpected error: {str(e)}")
-                continue
+                try:
+                    params, rmse = iterative_fit(x_filt, y_filt, func,
+                                                guesses[model_type], bounds)
+                    print(f"Successful {model_type} fit!")
+                    print(f"Parameters: {params}")
+                    print(f"RMSE: {rmse:.2f} pixels")
+                    
+                    models.append({
+                        'type': model_type,
+                        'func': func,
+                        'coeffs': params,
+                        'rmse': rmse,
+                        'points': (x_filt, y_filt)
+                    })
+                    
+                except RuntimeError as e:
+                    print(f"{model_type} fitting failed: {str(e)}")
+                    continue
+                except Exception as e:
+                    print(f"Unexpected error: {str(e)}")
+                    continue
 
         if models:
             best_model = sorted(models, key=lambda x: x['rmse'])[0]
             print(f"\nBest model: {best_model['type']} with RMSE {best_model['rmse']:.2f}")
             for model in models:
-                # Calculate angles with actual rotation matrix
-                if model['type'] == 'catenary':
-                    continue # Skip angle calculation for catenaries
-                try:
-                    rotation_matrix = np.eye(2)  # Replace with actual calculation
+
+                if model['type'] == 'cv2_ellipse':
                     y_min, y_max = np.min(y_filt), np.max(y_filt)
-                    
-                    top_angle = calculate_contact_angle(model, y_min, rotation_matrix)
-                    bottom_angle = calculate_contact_angle(model, y_max, rotation_matrix)
-                    
+                        
+                    (xc, yc, major, minor, angle) = model['coeffs']
+                    a, b = major / 2, minor / 2
+
+                    x_vals, y_vals, t_vals = ellipse_parametric_points(xc, yc, a, b, angle)
+                    roi_top = y_roi
+                    roi_bottom = y_roi + h
+
+                    (top_x, top_y, t_top), (bot_x, bot_y, t_bot) = find_top_bottom_intersections(x_vals, y_vals, t_vals, roi_top, roi_bottom)
+
+                    top_angle = ellipse_tangent_angle(a, b, t_top, angle)
+                    bottom_angle = ellipse_tangent_angle(a, b, t_bot, angle)
+
+                    # Store angles and points in output_data
                     output_data.append({
                         'side': side,
                         'model': model,
                         'top_angle': top_angle,
                         'bottom_angle': bottom_angle,
-                        'top_point': (model['func'](y_min, *model['coeffs']), y_min),
-                        'bottom_point': (model['func'](y_max, *model['coeffs']), y_max)
+                        'top_point': (top_x, top_y),
+                        'bottom_point': (bot_x, bot_y)
                     })
-                except Exception as e:
-                    print(f"Angle calculation failed: {str(e)}")
+                # Calculate angles with actual rotation matrix
+                if model['type'] == 'catenary':
+                    # continue # Skip angle calculation for catenaries
+                    try:
+                        rotation_matrix = np.eye(2)  # Replace with actual calculation
+                        y_min, y_max = np.min(y_filt), np.max(y_filt)
+                        
+                        top_angle = calculate_contact_angle(model, y_min, rotation_matrix)
+                        bottom_angle = calculate_contact_angle(model, y_max, rotation_matrix)
+                        
+                        output_data.append({
+                            'side': side,
+                            'model': model,
+                            'top_angle': top_angle,
+                            'bottom_angle': bottom_angle,
+                            'top_point': (model['func'](y_min, *model['coeffs']), y_min),
+                            'bottom_point': (model['func'](y_max, *model['coeffs']), y_max)
+                        })
+                    except Exception as e:
+                        print(f"Angle calculation failed: {str(e)}")
         for result in output_data:
             side = result['side']
             model = result['model']
@@ -291,23 +357,33 @@ def process_image(image_path):
             y_min, y_max = np.min(result['model']['points'][1]), np.max(result['model']['points'][1])
             y_vals = np.linspace(y_min, y_max, 100)
             
-            try:
-                # Calculate curve points
-                x_vals = model['func'](y_vals, *model['coeffs'])
-                
-                # Create points array and draw
-                points = np.array([x_vals, y_vals]).T.reshape(-1, 1, 2).astype(np.int32)
-                cv2.polylines(output, [points], False, color, 2)
-                
-                # Draw angle markers
-                cv2.circle(output, (int(result['top_point'][0]), int(result['top_point'][1])), 5, (255, 0, 0), -1)
-                cv2.circle(output, (int(result['bottom_point'][0]), int(result['bottom_point'][1])), 5, (0, 255, 255), -1)
-                # Wait for user to press any key to continue 
+            if model['type'] == 'cv2_ellipse':
+                (xc, yc, major, minor, angle) = model['coeffs']
+                ellipse_box = ((xc, yc), (major, minor), angle)
+                cv2.ellipse(output, ellipse_box, color, 2)
+
                 cv2.putText(output, "Press any key to continue...", (10, output.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                 cv2.imshow("Results", output)
                 cv2.waitKey(0)  # Wait indefinitely until a key is pressed
-            except Exception as e:
-                print(f"Error drawing {model['type']} curve: {str(e)}")
+
+            if model['type'] == 'catenary':
+                try:
+                    # Calculate curve points
+                    x_vals = model['func'](y_vals, *model['coeffs'])
+                    
+                    # Create points array and draw
+                    points = np.array([x_vals, y_vals]).T.reshape(-1, 1, 2).astype(np.int32)
+                    cv2.polylines(output, [points], False, color, 2)
+                    
+                    # Draw angle markers
+                    cv2.circle(output, (int(result['top_point'][0]), int(result['top_point'][1])), 5, (255, 0, 0), -1)
+                    cv2.circle(output, (int(result['bottom_point'][0]), int(result['bottom_point'][1])), 5, (0, 255, 255), -1)
+                    # Wait for user to press any key to continue 
+                    cv2.putText(output, "Press any key to continue...", (10, output.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.imshow("Results", output)
+                    cv2.waitKey(0)  # Wait indefinitely until a key is pressed
+                except Exception as e:
+                    print(f"Error drawing {model['type']} curve: {str(e)}")
 
         # Add legend
         cv2.putText(output, "Catenary", (10, 30), cv2.FONT_HERSHEY_COMPLEX, 0.7, (0, 255, 255), 2)
@@ -355,7 +431,14 @@ def process_image(image_path):
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    image_dir = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\Anton's snapshots\APTMS Filtered"
+    
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+    root.attributes('-topmost', True)  # Keep the file dialog on top
+    image_dir = filedialog.askdirectory(title="Select Image Directory")
+    if not image_dir:
+        print("No directory selected. Exiting.")
+        exit(1)
     valid_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tif')
     for filename in sorted(os.listdir(image_dir)):
         if filename.lower().endswith(valid_extensions):
