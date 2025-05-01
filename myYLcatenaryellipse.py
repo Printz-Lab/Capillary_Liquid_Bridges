@@ -16,12 +16,12 @@ def right_catenary(y, a, y0, c):
 def left_ellipse(y, h, k, a, b):
     """Safer ellipse calculation"""
     with np.errstate(invalid='ignore'):
-        return h - a * np.sqrt(np.clip(1 - ((y-k)/b)**2, 1e-6, 1))
+        return h + a * np.sqrt(1 - ((y-k)/b)**2)
 
 def right_ellipse(y, h, k, a, b):
     """Safer right-opening ellipse"""
     with np.errstate(invalid='ignore'):
-        return h + a * np.sqrt(np.clip(1 - ((y-k)/b)**2, 1e-6, 1))
+        return h - a * np.sqrt(1 - ((y-k)/b)**2)
 
 def select_roi(image):
     cv2.namedWindow("Select ROI", cv2.WINDOW_NORMAL)
@@ -69,17 +69,17 @@ def calculate_contact_angle(curve, y_pos, rotation_matrix):
 
 def get_initial_guesses(x_data, y_data, side, roi_x, roi_width):
     y_center = np.mean(y_data)
-    y_range = np.max(y_data) - np.min(y_data)
+    y_range = np.ptp(y_data)  # Peak-to-peak range
     
     # Catenary parameters (unchanged)
     a_cat = roi_width * 0.1
     c_cat = roi_x + (0.2 * roi_width if side == "left" else 0.8 * roi_width)
     
     # Improved ellipse parameters
-    h_ell = roi_x + (0.4 * roi_width if side == "left" else 0.6 * roi_width)
+    h_ell = roi_x + (0.35 * roi_width if side == "left" else 0.65 * roi_width)
     k_ell = y_center
-    a_ell = 0.15 * roi_width  # Reduced initial major axis
-    b_ell = 0.4 * y_range     # More conservative minor axis
+    a_ell = 0.2 * roi_width  # Semi-major axis
+    b_ell = max(0.5 * y_range, 10)  # Ensure minimum minor axis length
     
     return {
         'catenary': [a_cat, y_center, c_cat],
@@ -87,70 +87,56 @@ def get_initial_guesses(x_data, y_data, side, roi_x, roi_width):
     }
 
 def get_bounds(side, roi_x, roi_width, model_type):
-    """Improved physics-based constraints"""
+    """More flexible physics-based constraints"""
     if model_type == 'catenary':
         return (
-            [0.1*roi_width, -np.inf, roi_x + (0 if side == 'left' else 0.6*roi_width)],
-            [2*roi_width, np.inf, roi_x + (0.4*roi_width if side == 'left' else roi_width)]
+            [0.05*roi_width, -np.inf, roi_x + (0 if side == 'left' else 0.5*roi_width)],
+            [3*roi_width, np.inf, roi_x + (0.5*roi_width if side == 'left' else roi_width)]
         )
     elif model_type == 'ellipse':
         return (
-            [roi_x + (0 if side == 'left' else 0.5*roi_width), 
-             -np.inf, 0.1*roi_width, 0.1*roi_width],
-            [roi_x + (0.5*roi_width if side == 'left' else roi_width), 
-             np.inf, roi_width, 2*roi_width]
+            [roi_x - 0.3*roi_width,  # More flexible x-center
+             -np.inf, 
+             0.05*roi_width,  # Minimum major axis
+             5],  # Minimum minor axis
+            [roi_x + 1.3*roi_width, 
+             np.inf, 
+             roi_width, 
+             3*roi_width]
         )
 
 def iterative_fit(x_data, y_data, model_func, initial_params, bounds, max_iter=5):
-    """Robust iterative fitting with adaptive learning"""
-    best_params = initial_params.copy()
+    """Robust fitting with parameter validation"""
+    # Ensure initial parameters are within bounds
+    params = np.clip(initial_params, bounds[0], bounds[1])
+    best_params = params.copy()
     best_rmse = np.inf
-    success = False  # Track if any iteration succeeded
     
     for i in range(max_iter):
         try:
-            # Check parameter feasibility
-            if not np.all(np.logical_and(
-                np.array(bounds[0]) <= best_params,
-                best_params <= np.array(bounds[1])
-            )):
-                print(f"Iteration {i+1}: Initial params out of bounds")
-                continue
-                
-            # Perform curve fitting
             params, _ = curve_fit(
                 model_func, y_data, x_data,
                 p0=best_params,
                 bounds=bounds,
                 method='trf',
-                max_nfev=2000*(i+1),
-                ftol=1e-4,
-                xtol=1e-4
+                max_nfev=2000*(i+1)
             )
             
-            # Calculate RMSE
+            # Validate parameters stay within bounds
+            params = np.clip(params, bounds[0], bounds[1])
+            
             residuals = x_data - model_func(y_data, *params)
             current_rmse = np.sqrt(np.mean(residuals**2))
             
             if current_rmse < best_rmse:
                 best_rmse = current_rmse
                 best_params = params
-                success = True
                 print(f"Iteration {i+1}: RMSE improved to {best_rmse:.2f}")
 
-                # Adjust bounds conservatively
-                bounds = (
-                    np.clip(params*0.9, [b*0.95 for b in bounds[0]], [b*1.05 for b in bounds[1]]),
-                    np.clip(params*1.1, [b*0.95 for b in bounds[0]], [b*1.05 for b in bounds[1]])
-                )
-                
         except Exception as e:
             print(f"Iteration {i+1} failed: {str(e)}")
             continue
             
-    if not success:
-        raise RuntimeError("All iterations failed to converge")
-        
     return best_params, best_rmse
 
 def show_fit_debug(image, x_data, y_data, fits, roi):
@@ -222,7 +208,9 @@ def process_image(image_path):
             
         xs, ys = points[:, 0], points[:, 1]
         print(f"\nProcessing {side} side with {len(xs)} points")
-        
+        # Plot xs, ys points on the output image in pink
+        for x, y in zip(xs, ys):
+            cv2.circle(output, (int(x), int(y)), 2, (255, 105, 180), -1)  # Pink color (BGR: 180, 105, 255)
         guesses = get_initial_guesses(xs, ys, side, x_roi, w)
         if not guesses:
             continue
@@ -248,7 +236,6 @@ def process_image(image_path):
             bounds = get_bounds(side, x_roi, w, model_type)
             print(f"Using bounds:\nLower: {bounds[0]}\nUpper: {bounds[1]}")
             
-            # In the model fitting loop:
             try:
                 params, rmse = iterative_fit(x_filt, y_filt, func,
                                             guesses[model_type], bounds)
@@ -274,25 +261,58 @@ def process_image(image_path):
         if models:
             best_model = sorted(models, key=lambda x: x['rmse'])[0]
             print(f"\nBest model: {best_model['type']} with RMSE {best_model['rmse']:.2f}")
+            for model in models:
+                # Calculate angles with actual rotation matrix
+                if model['type'] == 'catenary':
+                    continue # Skip angle calculation for catenaries
+                try:
+                    rotation_matrix = np.eye(2)  # Replace with actual calculation
+                    y_min, y_max = np.min(y_filt), np.max(y_filt)
+                    
+                    top_angle = calculate_contact_angle(model, y_min, rotation_matrix)
+                    bottom_angle = calculate_contact_angle(model, y_max, rotation_matrix)
+                    
+                    output_data.append({
+                        'side': side,
+                        'model': model,
+                        'top_angle': top_angle,
+                        'bottom_angle': bottom_angle,
+                        'top_point': (model['func'](y_min, *model['coeffs']), y_min),
+                        'bottom_point': (model['func'](y_max, *model['coeffs']), y_max)
+                    })
+                except Exception as e:
+                    print(f"Angle calculation failed: {str(e)}")
+        for result in output_data:
+            side = result['side']
+            model = result['model']
+            color = (0, 255, 0) if side == 'left' else (0, 0, 255)
             
-            # Calculate angles with actual rotation matrix
+            # Generate points for plotting
+            y_min, y_max = np.min(result['model']['points'][1]), np.max(result['model']['points'][1])
+            y_vals = np.linspace(y_min, y_max, 100)
+            
             try:
-                rotation_matrix = np.eye(2)  # Replace with actual calculation
-                y_min, y_max = np.min(y_filt), np.max(y_filt)
+                # Calculate curve points
+                x_vals = model['func'](y_vals, *model['coeffs'])
                 
-                top_angle = calculate_contact_angle(best_model, y_min, rotation_matrix)
-                bottom_angle = calculate_contact_angle(best_model, y_max, rotation_matrix)
+                # Create points array and draw
+                points = np.array([x_vals, y_vals]).T.reshape(-1, 1, 2).astype(np.int32)
+                cv2.polylines(output, [points], False, color, 2)
                 
-                output_data.append({
-                    'side': side,
-                    'model': best_model,
-                    'top_angle': top_angle,
-                    'bottom_angle': bottom_angle,
-                    'top_point': (best_model['func'](y_min, *best_model['coeffs']), y_min),
-                    'bottom_point': (best_model['func'](y_max, *best_model['coeffs']), y_max)
-                })
+                # Draw angle markers
+                cv2.circle(output, (int(result['top_point'][0]), int(result['top_point'][1])), 5, (255, 0, 0), -1)
+                cv2.circle(output, (int(result['bottom_point'][0]), int(result['bottom_point'][1])), 5, (0, 255, 255), -1)
+                # Wait for user to press any key to continue 
+                cv2.putText(output, "Press any key to continue...", (10, output.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.imshow("Results", output)
+                cv2.waitKey(0)  # Wait indefinitely until a key is pressed
             except Exception as e:
-                print(f"Angle calculation failed: {str(e)}")
+                print(f"Error drawing {model['type']} curve: {str(e)}")
+
+        # Add legend
+        cv2.putText(output, "Catenary", (10, 30), cv2.FONT_HERSHEY_COMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(output, "Ellipse", (10, 60), cv2.FONT_HERSHEY_COMPLEX, 0.7, (255, 0, 255), 2)
+        
 
     # Save results (same as before)
     output_dir = os.path.join(os.path.dirname(image_path), "analyzed_results")
