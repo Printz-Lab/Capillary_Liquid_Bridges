@@ -6,6 +6,8 @@ from scipy.optimize import curve_fit
 import tkinter as tk
 from tkinter import filedialog
 
+from sklearn.linear_model import RANSACRegressor
+
 # Define left and right catenary functions
 def left_catenary(y, a, y0, c):
     """Catenary curve for left edge (opens to the right)"""
@@ -15,15 +17,7 @@ def right_catenary(y, a, y0, c):
     """Catenary curve for right edge (opens to the left)"""
     return a * np.cosh((y - y0) / a) + c
 
-def left_ellipse(y, h, k, a, b):
-    """Safer ellipse calculation"""
-    with np.errstate(invalid='ignore'):
-        return h + a * np.sqrt(1 - ((y-k)/b)**2)
 
-def right_ellipse(y, h, k, a, b):
-    """Safer right-opening ellipse"""
-    with np.errstate(invalid='ignore'):
-        return h - a * np.sqrt(1 - ((y-k)/b)**2)
 
 def select_roi(image):
     cv2.namedWindow("Select ROI", cv2.WINDOW_NORMAL)
@@ -31,45 +25,104 @@ def select_roi(image):
     cv2.destroyWindow("Select ROI")
     return roi
 
-def residual_filter(x_data, y_data, model_func, initial_params, n_std=2):
-    """Simple residual-based outlier filtering"""
-    try:
-        # Initial fit to identify outliers
-        params, _ = curve_fit(model_func, y_data, x_data, p0=initial_params, maxfev=2000)
-        
-        # Calculate residuals
-        predicted = model_func(y_data, *params)
-        residuals = x_data - predicted
-        
-        # Filter points within n_std standard deviations
-        residual_std = np.std(residuals)
-        mask = np.abs(residuals) <= n_std * residual_std
-        
-        return x_data[mask], y_data[mask]
-    except:
-        # Fallback if initial fit fails
-        return x_data, y_data
-
-def calculate_contact_angle(curve, y_pos, rotation_matrix):
-    """Calculate angle for both catenary and ellipse"""
+def calculate_contact_angle(curve, y_pos, rotation_angle):
+    """Calculate angle with proper rotation"""
     if curve['type'] == 'catenary':
         a, y0, c = curve['coeffs']
-        dx_dy = np.sinh((y_pos - y0)/a) 
+        dx_dy = np.sinh((y_pos - y0)/a)
         dx_dy *= -1 if curve['func'] == left_catenary else 1
-        
-    elif curve['type'] == 'ellipse':
-        h, k, a, b = curve['coeffs']
-        term = ((y_pos - k)/b)**2
-        sqrt_term = np.sqrt(np.clip(1 - term, 1e-6, 1))
-        dx_dy = (a/(b**2)) * (y_pos - k)/sqrt_term
-        dx_dy *= -1 if curve['func'] == left_ellipse else 1
-        
+    else:  # Ellipse
+        # Get tangent from ellipse parameters
+        (xc, yc), (major, minor), angle = curve['coeffs']
+        # ... ellipse tangent calculation ...
+
+    # Create proper rotation matrix
+    theta = np.deg2rad(rotation_angle)
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta), np.cos(theta)]
+    ])
+    
     direction_vec = np.array([1, dx_dy])
     rotated_vec = np.dot(rotation_matrix, direction_vec)
-    angle = np.arctan2(rotated_vec[1], rotated_vec[0])
-    return np.degrees(angle) % 180
+    return np.degrees(np.arctan2(rotated_vec[1], rotated_vec[0])) % 180
 
-import numpy as np
+from sklearn.linear_model import RANSACRegressor
+from sklearn.base import BaseEstimator, RegressorMixin
+
+class CurveFitEstimator(BaseEstimator, RegressorMixin):
+    """Custom estimator for curve_fit-based models"""
+    def __init__(self, model_func, initial_params, maxfev=5000):
+        self.model_func = model_func
+        self.initial_params = initial_params
+        self.maxfev = maxfev
+        self.params_ = None
+
+    def fit(self, X, y):
+        try:
+            # X contains y-values (input), y contains x-values (target)
+            # because our models are x = f(y)
+            self.params_, _ = curve_fit(
+                self.model_func, X.ravel(), y,
+                p0=self.initial_params,
+                maxfev=self.maxfev
+            )
+            return self
+        except Exception as e:
+            raise RuntimeError(f"Curve fit failed: {str(e)}")
+
+    def predict(self, X):
+        if self.params_ is None:
+            raise RuntimeError("Estimator not fitted yet")
+        return self.model_func(X.ravel(), *self.params_)
+
+def ransac_filter(xs, ys, model_func, initial_params, n_trials=200):
+    """RANSAC filtering using scikit-learn's RANSACRegressor
+    
+    Args:
+        xs: Array of x-coordinates (target values)
+        ys: Array of y-coordinates (input values)
+        model_func: Curve model function (x = f(y, *params))
+        initial_params: Initial parameters for curve fitting
+        n_trials: Maximum number of RANSAC iterations
+        
+    Returns:
+        Filtered (x, y) arrays containing inliers
+    """
+    if len(xs) < 5:
+        return xs, ys  # Not enough points for meaningful filtering
+
+    X = ys.reshape(-1, 1)
+    y = xs
+    
+    
+    # Configure RANSAC with custom curve fit estimator
+    estimator = CurveFitEstimator(model_func, initial_params)
+    ransac = RANSACRegressor(
+        estimator=estimator,
+        min_samples=max(0.1 * len(xs), 70),  # At least 70 points or 10% of data
+        residual_threshold=np.std(xs)/2,
+        max_trials=n_trials,
+        random_state=42
+    )
+
+    try:
+        ransac.fit(X, y)
+        inlier_mask = ransac.inlier_mask_
+        return xs[inlier_mask], ys[inlier_mask]
+    except Exception as e:
+        print(f"RANSAC failed: {str(e)}. Returning all points.")
+        return xs, ys
+    
+
+
+
+def ellipse_model(y, xc, yc, a, b, theta):
+    """Ellipse parametric model for RANSAC (x = f(y))"""
+    theta = np.deg2rad(theta)
+    y_rot = (y - yc) * np.cos(theta) - (y - yc) * np.sin(theta)  # Simplified
+    t = np.arcsin(np.clip((y_rot)/b, -1, 1))  # Parameter along ellipse
+    return xc + a * np.cos(t) * np.cos(theta) - b * np.sin(t) * np.sin(theta)
 
 def ellipse_parametric_points(xc, yc, a, b, angle_deg, num_points=1000):
     theta = np.deg2rad(angle_deg)
@@ -80,13 +133,11 @@ def ellipse_parametric_points(xc, yc, a, b, angle_deg, num_points=1000):
     x = xc + a * cos_t * np.cos(theta) - b * sin_t * np.sin(theta)
     y = yc + a * cos_t * np.sin(theta) + b * sin_t * np.cos(theta)
     return x, y, t
-
 def find_top_bottom_intersections(x, y, t, roi_top, roi_bottom):
     # Get index closest to top and bottom y-values
     idx_top = np.argmin(np.abs(y - roi_top))
     idx_bottom = np.argmin(np.abs(y - roi_bottom))
     return (x[idx_top], y[idx_top], t[idx_top]), (x[idx_bottom], y[idx_bottom], t[idx_bottom])
-
 def ellipse_tangent_angle(a, b, t_val, angle_deg):
     # Derivatives of x(t) and y(t)
     theta = np.deg2rad(angle_deg)
@@ -115,44 +166,43 @@ def compute_cv2_ellipse_rmse(x_data, y_data, xc, yc, major, minor, angle_deg, nu
     rmse = np.sqrt(np.mean(min_dists**2))
     return rmse
 
-
-
-def get_initial_guesses(x_data, y_data, side, roi_x, roi_width):
+def get_initial_guesses(x_data, y_data, side, roi_x, w, h):
+    """Returns smarter initial parameters based on physical constraints"""
     y_center = np.mean(y_data)
-    y_range = np.ptp(y_data)  # Peak-to-peak range
+    y_range = np.max(y_data) - np.min(y_data)
     
-    # Catenary parameters (unchanged)
-    a_cat = roi_width * 0.1
-    c_cat = roi_x + (0.2 * roi_width if side == "left" else 0.8 * roi_width)
+    # Catenary guesses (a, y0, c)
+    if side == "left":
+        a_cat = w * 0.15  # Width/7 is typical for droplets
+        c_cat = roi_x + w * 0.25  # 25% from left edge
+    else:
+        a_cat = w * 0.15
+        c_cat = roi_x + w * 0.75  # 75% from left edge
     
-    # Improved ellipse parameters
-    h_ell = roi_x + (0.35 * roi_width if side == "left" else 0.65 * roi_width)
-    k_ell = y_center
-    a_ell = 0.2 * roi_width  # Semi-major axis
-    b_ell = max(0.5 * y_range, 10)  # Ensure minimum minor axis length
+    # Ellipse guesses (xc, yc, a, b, theta)
+    xc_ell = roi_x + (0.3 * w if side == "left" else 0.7 * w)
+    yc_ell = y_center
+    a_ell = w * 0.2  # Major axis ~20% ROI width
+    b_ell = y_range * 0.5    # Minor axis ~50% height range
+    theta_ell = 0 if side == "left" else 180  # Left=opens right, Right=opens left
     
     return {
         'catenary': [a_cat, y_center, c_cat],
-        'ellipse': [h_ell, k_ell, a_ell, b_ell]
+        'ellipse': [xc_ell, yc_ell, a_ell, b_ell, theta_ell]
     }
 
-def get_bounds(side, roi_x, roi_width, model_type):
-    """More flexible physics-based constraints"""
+def get_bounds(side, roi_x, roi_y, w, roi_height, model_type):
+    """Physics-constrained parameter bounds"""
     if model_type == 'catenary':
         return (
-            [0.05*roi_width, -np.inf, roi_x + (0 if side == 'left' else 0.5*roi_width)],
-            [3*roi_width, np.inf, roi_x + (0.5*roi_width if side == 'left' else roi_width)]
+            [0.05*w, roi_y, roi_x],  # min a, min y0, min c
+            [0.5*w, roi_y+roi_height, roi_x+w]  # max a, max y0, max c
         )
-    elif model_type == 'ellipse':
+    else:  # ellipse
         return (
-            [roi_x - 0.3*roi_width,  # More flexible x-center
-             -np.inf, 
-             0.05*roi_width,  # Minimum major axis
-             5],  # Minimum minor axis
-            [roi_x + 1.3*roi_width, 
-             np.inf, 
-             roi_width, 
-             3*roi_width]
+            [roi_x, roi_y, 5, 5, -180],  # min xc,yc,a,b,angle
+            [roi_x+w, roi_y+roi_height, 
+             w, roi_height, 180]  # max xc,yc,a,b,angle
         )
 
 def iterative_fit(x_data, y_data, model_func, initial_params, bounds, max_iter=5):
@@ -231,10 +281,8 @@ def process_image(image_path):
             
         xs, ys = points[:, 0], points[:, 1]
         print(f"\nProcessing {side} side with {len(xs)} points")
-        # # Plot xs, ys points on the output image in pink
-        # for x, y in zip(xs, ys):
-        #     cv2.circle(output, (int(x), int(y)), 2, (255, 105, 180), -1)  # Pink color (BGR: 180, 105, 255)
-        guesses = get_initial_guesses(xs, ys, side, x_roi, w)
+        
+        guesses = get_initial_guesses(xs, ys, side, x_roi, w, h)
         if not guesses:
             continue
             
@@ -244,22 +292,41 @@ def process_image(image_path):
             print(f"\n--- {model_type.upper()} FIT ATTEMPT ---")
             func = left_catenary if (side == 'left' and model_type == 'catenary') else \
                    right_catenary if (side == 'right' and model_type == 'catenary') else \
-                   left_ellipse if (side == 'left' and model_type == 'ellipse') else \
-                   right_ellipse
+                   ellipse_parametric_points if (side == 'left' and model_type == 'ellipse') else \
+                   ellipse_parametric_points
+            
+            if model_type == 'ellipse':
+                # Custom ellipse-aware RANSAC filter
+                x_filt, y_filt  = ransac_filter(
+                    xs, ys,
+                    model_func= ellipse_model,  # New ellipse model function
+                    initial_params=guesses['ellipse'],
+                    n_trials=500
+                )
+                
+                
+                
+            else:  # Catenary
+                func = left_catenary if side == 'left' else right_catenary
+                x_filt, y_filt = ransac_filter(
+                    xs, ys,
+                    model_func=func,
+                    initial_params=guesses['catenary'],
+                    n_trials=200
+                )
+ 
 
-            # Apply residual-based filtering
-            x_filt, y_filt = residual_filter(xs, ys, func, guesses[model_type])
+            print(f"After residual filtering: {len(x_filt)}/{len(xs)} points remain")
+
+
+            for x, y in zip(xs, ys):
+                cv2.circle(output, (int(x), int(y)), 2, (0, 105, 255), -1)
             for x, y in zip(x_filt, y_filt):
                 cv2.circle(output, (int(x), int(y)), 2, (180, 105, 255), -1)
-            pts_for_cv2 = np.column_stack((x_filt, y_filt)).astype(np.int32)
-            print(f"After residual filtering: {len(x_filt)}/{len(xs)} points remain")
             
-            if len(x_filt) < 20:
-                print("Insufficient points for fitting")
-                continue
             if model_type == 'ellipse':
-                if len(pts_for_cv2) >= 5:  # cv2.fitEllipse requires at least 5 points
-                    ellipse = cv2.fitEllipse(pts_for_cv2)
+                if len(np.column_stack((x_filt, y_filt)).astype(np.int32)) >= 5:  # cv2.fitEllipse requires at least 5 points
+                    ellipse = cv2.fitEllipse(np.column_stack((x_filt, y_filt)).astype(np.int32))
                     (xc, yc), (major, minor), angle = ellipse
                     print(f"OpenCV Ellipse Fit: center=({xc:.1f}, {yc:.1f}), axes=({major:.1f}, {minor:.1f}), angle={angle:.1f}")
                     rmse = compute_cv2_ellipse_rmse(x_filt, y_filt, xc, yc, major, minor, angle)
@@ -274,7 +341,7 @@ def process_image(image_path):
 
             if model_type == 'catenary':
                 # Get adaptive bounds
-                bounds = get_bounds(side, x_roi, w, model_type)
+                bounds = get_bounds(side, x_roi, y_roi, w, h, model_type)
                 print(f"Using bounds:\nLower: {bounds[0]}\nUpper: {bounds[1]}")
                 
                 try:
@@ -399,7 +466,7 @@ def process_image(image_path):
         writer = csv.writer(f)
         writer.writerow([
             "Filename", "Side", "Model", "RMSE",
-            "Param1", "Param2", "Param3", "Param4",
+            "Param1", "Param2", "Param3", "Param4", "Param5",
             "TopAngle", "BottomAngle",
             "TopX", "TopY", "BottomX", "BottomY"
         ])
