@@ -326,7 +326,7 @@ def process_image(image_path):
             
             if model_type == 'ellipse':
                 if len(np.column_stack((x_filt, y_filt)).astype(np.int32)) >= 5:  # cv2.fitEllipse requires at least 5 points
-                    ellipse = cv2.fitEllipse(np.column_stack((x_filt, y_filt)).astype(np.int32))
+                    ellipse = cv2.fitEllipseAMS(np.column_stack((x_filt, y_filt)).astype(np.int32))
                     (xc, yc), (major, minor), angle = ellipse
                     print(f"OpenCV Ellipse Fit: center=({xc:.1f}, {yc:.1f}), axes=({major:.1f}, {minor:.1f}), angle={angle:.1f}")
                     rmse = compute_cv2_ellipse_rmse(x_filt, y_filt, xc, yc, major, minor, angle)
