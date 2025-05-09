@@ -1,0 +1,473 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import tkinter as tk
+from tkinter import filedialog
+
+def select_roi(image):
+    print("Select ROI and press ENTER or SPACE. Press ESC to cancel.")
+    roi = cv2.selectROI("Select ROI", image, fromCenter=False, showCrosshair=True)
+    cv2.destroyWindow("Select ROI")
+    x, y, w, h = roi
+    return x, y, x + w, y + h  # (x_min, y_min, x_max, y_max)
+
+def draw_detected_substrate_roi(image, roi_coords):
+    x_min, y_min, x_max, y_max = roi_coords
+    img = image.copy()
+    cv2.rectangle(img, (x_min, y_min), (x_max, y_max), (0, 255, 255), 2)
+    plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    plt.title("Auto-detected ROI from Substrates")
+    plt.axis('off')
+    plt.show()
+
+def preprocess_image(image, blur_ksize=5, canny_thresh=(50, 150)):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (blur_ksize, blur_ksize), 0)
+    edges = cv2.Canny(blurred, *canny_thresh)
+    return edges
+
+def find_largest_contour(edges):
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contours:
+        return None
+    return max(contours, key=cv2.contourArea)
+
+def split_contour_top_bottom(contour, buffer_px=5):
+    contour = contour.reshape(-1, 2)
+    y_min = np.min(contour[:, 1])
+    y_max = np.max(contour[:, 1])
+    y_center = (y_min + y_max) / 2
+
+    top = contour[contour[:, 1] < (y_center - buffer_px)]
+    bottom = contour[contour[:, 1] > (y_center + buffer_px)]
+
+    return top.reshape(-1, 1, 2), bottom.reshape(-1, 1, 2)
+
+def split_contour_left_right(contour, buffer_px=5):
+    contour = contour.reshape(-1, 2)
+    print("Sample contour points (first 5):", contour[:5])  # debug line
+
+    # Just to be explicit:
+    xs = contour[:, 0]
+    ys = contour[:, 1]
+
+    x_min = np.min(xs)
+    x_max = np.max(xs)
+    x_center = (x_min + x_max) / 2
+
+    # Filter based on x-coordinates
+    left = contour[xs < (x_center - buffer_px)]
+    right = contour[xs > (x_center + buffer_px)]
+
+    print(f"Left points: {len(left)}, Right points: {len(right)}")  # debug line
+
+    return left.reshape(-1, 1, 2), right.reshape(-1, 1, 2)
+
+def fit_ellipse_to_contour(contour):
+    return cv2.fitEllipse(contour) if len(contour) >= 5 else None
+
+def crop_left_right(image):
+    h, w = image.shape[:2]
+    mid = w // 2
+    left = image[:, :mid]
+    right = image[:, mid:]
+    return left, right
+
+def process_droplet_two_lobes(image_path):
+    image = cv2.imread(image_path)
+    if image is None:
+        print("Failed to load image.")
+        return
+
+    # ROI selection
+    roi_coords = select_roi(image)
+    if roi_coords is None:
+        return
+    x_min, y_min, x_max, y_max = roi_coords
+    cropped = image[y_min:y_max, x_min:x_max]
+
+    draw_detected_substrate_roi(image, roi_coords)
+
+    # From your ROI selection
+    top_y = y_min
+    bottom_y = y_max
+
+    # Split ROI into left and right
+    left_img, right_img = crop_left_right(cropped)
+
+    # Process left side
+    edges_left = preprocess_image(left_img)
+    contour_left = find_largest_contour(edges_left)
+    ellipse_left = fit_ellipse_to_contour(contour_left) if contour_left is not None else None
+
+    # Process right side
+    edges_right = preprocess_image(right_img)
+    contour_right = find_largest_contour(edges_right)
+    ellipse_right = fit_ellipse_to_contour(contour_right) if contour_right is not None else None
+
+    # Offset right ellipse by half-width to align on original image
+    h, w = cropped.shape[:2]
+    if ellipse_right:
+        (xc, yc), (MA, ma), angle = ellipse_right
+        ellipse_right = ((xc + w // 2, yc), (MA, ma), angle)
+        contour_right = contour_right + np.array([[[w // 2, 0]]])
+
+    # Combine for visualization
+    all_contours = []
+    if contour_left is not None:
+        all_contours.append(contour_left)
+    if contour_right is not None:
+        all_contours.append(contour_right)
+
+    # draw_results_on_full_image(image, (x_min, y_min, x_max, y_max), contour_left, contour_right, ellipse_left, ellipse_right)
+    return ellipse_left, ellipse_right, (x_min, y_min, x_max, y_max), image, cropped
+
+def ellipse_to_points(center, axes, angle_deg, num_points=360):
+    cx, cy = center
+    a, b = axes[0] / 2, axes[1] / 2  # major and minor radii
+    theta = np.deg2rad(angle_deg)
+
+    t = np.linspace(0, 2 * np.pi, num_points)
+    cos_angle = np.cos(theta)
+    sin_angle = np.sin(theta)
+
+    x = a * np.cos(t)
+    y = b * np.sin(t)
+
+    x_rot = cos_angle * x - sin_angle * y + cx
+    y_rot = sin_angle * x + cos_angle * y + cy
+
+    return np.stack((x_rot, y_rot), axis=-1)  # shape: (N, 2)
+
+def contact_angle_at_index(points, index, side='left', label='top'):
+    if index <= 0 or index >= len(points) - 1:
+        return None
+    p1 = points[index - 1]
+    p2 = points[index + 1]
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    angle_rad = np.arctan2(np.abs(dy), np.abs(dx))
+    angle_deg = np.rad2deg(angle_rad)
+    print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
+    # Flip convention for left side
+    if side == 'left' and label == 'top' or side == 'right' and label == 'bottom':
+        angle_deg = -angle_deg
+    return angle_deg
+def find_contact_point_on_line_half(points, line_y, side='right', tolerance=5):
+    # Get center x to split
+    center_x = np.mean(points[:, 0])
+    if side == 'right':
+        relevant_points = points[points[:, 0] > center_x]
+    else:
+        relevant_points = points[points[:, 0] < center_x]
+
+    dists = np.abs(relevant_points[:, 1] - line_y)
+    close_indices = np.where(dists < tolerance)[0]
+    if len(close_indices) == 0:
+        return None
+    best_idx = close_indices[np.argmin(dists[close_indices])]
+    return best_idx, relevant_points[best_idx]
+
+def extract_all_contact_angles(ellipse, roi_y_top, roi_y_bottom, side='left'):
+    if ellipse is None:
+        return {}
+
+    center, axes, angle = ellipse
+    points = ellipse_to_points(center, axes, angle)
+
+    result = {}
+
+    for label, line_y in [('top', roi_y_top), ('bottom', roi_y_bottom)]:
+        side_selector = 'right' if side == 'left' else 'left'  # inward-facing side
+        idx, pt = find_contact_point_on_line_half(points, line_y, side_selector)
+        if pt is not None:
+            ang = contact_angle_at_index(points, idx, side, label)
+            result[label] = {'point': pt, 'angle_deg': ang}
+        else:
+            result[label] = {'point': None, 'angle_deg': None}
+
+    return result
+def draw_debug_overlay(full_image, roi_coords, ellipse_left=None, ellipse_right=None, 
+                        contacts_left=None, contacts_right=None, origin=None):
+    x_min, y_min, x_max, y_max = roi_coords
+    img = full_image.copy()
+
+    # Draw ROI boundary (optional)
+    cv2.rectangle(img, (x_min, y_min), (x_max, y_max), (0, 255, 255), 1) #color: yellow
+
+    # Draw substrate lines
+    cv2.line(img, (x_min, y_min), (x_max, y_min), (255, 0, 255), 1)  # Top line, color: magenta
+    cv2.line(img, (x_min, y_max), (x_max, y_max), (255, 0, 255), 1)  # Bottom line
+
+    # Draw ellipses
+    if ellipse_left:
+        (xc, yc), (MA, ma), angle = ellipse_left
+        shifted = ((xc + x_min, yc + y_min), (MA, ma), angle)
+        cv2.ellipse(img, shifted, (0, 0, 255), 2)
+    if ellipse_right:
+        (xc, yc), (MA, ma), angle = ellipse_right
+        shifted = ((xc + x_min, yc + y_min), (MA, ma), angle)
+        cv2.ellipse(img, shifted, (0, 255, 0), 2)
+
+    # Draw contact points
+    for contacts, color in [(contacts_left, (0, 0, 255)), (contacts_right, (0, 255, 0))]:
+        if contacts:
+            for pos in ['top', 'bottom']:
+                pt = contacts[pos]['point']
+                if pt is not None:
+                    shifted_pt = (int(pt[0] + x_min), int(pt[1] + y_min))
+                    cv2.circle(img, shifted_pt, 5, color, -1)
+    if origin is not None:
+            # Shift origin from cropped coordinates to full image coordinates
+            shifted_origin = (int(origin[0] + x_min), int(origin[1] + y_min))
+            
+            # Vertical axis (X_new) - cyan line
+            cv2.line(img, (shifted_origin[0], y_min), (shifted_origin[0], y_max), (255, 255, 0), 2)
+            
+            # Horizontal axis (Y_new) - cyan line
+            cv2.line(img, (x_min, shifted_origin[1]), (x_max, shifted_origin[1]), (255, 255, 0), 2)
+
+    # Show the image
+    plt.figure(figsize=(10, 6))
+    plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    plt.title("Ellipses, Contact Points, and New Axes")
+    plt.axis('off')
+    plt.show()
+
+def compute_curve_distance(ellipse_left, ellipse_right, num_samples=200):
+    pts_l = ellipse_to_points(*ellipse_left)
+    pts_r = ellipse_to_points(*ellipse_right)
+
+    # restrict to overlapping y‑range
+    y0 = max(pts_l[:,1].min(), pts_r[:,1].min())
+    y1 = min(pts_l[:,1].max(), pts_r[:,1].max())
+    ys = np.linspace(y0, y1, num_samples)
+
+    # sort left points by y
+    idx_l = np.argsort(pts_l[:,1])
+    y_l_sorted = pts_l[idx_l, 1]
+    x_l_sorted = pts_l[idx_l, 0]
+    xs_l = np.interp(ys, y_l_sorted, x_l_sorted)
+
+    # sort right points by y
+    idx_r = np.argsort(pts_r[:,1])
+    y_r_sorted = pts_r[idx_r, 1]
+    x_r_sorted = pts_r[idx_r, 0]
+    xs_r = np.interp(ys, y_r_sorted, x_r_sorted)
+
+    return ys, xs_l, xs_r, xs_r - xs_l
+
+def transform_points_to_new_frame(xs, ys, origin):
+    ox, oy = origin
+    # new X = (y - oy)   (vertical displ)
+    # new Y = (x - ox)   (lateral displ)
+    X_new = ys - oy
+    Y_new = xs - ox
+    return X_new, Y_new
+
+def transform_point_to_frame(pt, origin):
+    """
+    pt: (x_pixel, y_pixel) in cropped image coords
+    origin: (x0, y0) in cropped image coords
+    returns: (X_new, Y_new) = (vertical, lateral) relative to origin
+    """
+    x0, y0 = origin
+    x_pt, y_pt = pt
+    Xn = y_pt - y0    # up/down from origin → new X
+    Yn = x_pt - x0    # left/right from origin → new Y
+    return Xn, Yn
+
+def shift_point_to_full_image(pt, roi_origin, half_width_offset=0):
+    x_shift = roi_origin[0] + half_width_offset
+    y_shift = roi_origin[1]
+    return np.array([pt[0] + x_shift, pt[1] + y_shift])
+
+def draw_contact_angle_debug(full_image, contact, roi_origin, color, half_width_offset=0, label=""):
+    img = full_image.copy()
+
+    pt = contact['point']
+    angle = contact['angle_deg']
+    if pt is None or angle is None:
+        return img
+
+    # Shift contact point to full image
+    pt_full = shift_point_to_full_image(pt, roi_origin, half_width_offset)
+    x0, y0 = int(pt_full[0]), int(pt_full[1])
+
+    # Draw point
+    cv2.circle(img, (x0, y0), 4, color, -1)
+
+    # Compute tangent vector
+    length = 40  # length of tangent line
+
+    angle_rad = np.deg2rad(angle)
+    dx = int(length * np.cos(angle_rad))
+    dy = -int(length * np.sin(angle_rad))
+
+    # Tangent line
+    pt1 = (x0 - dx, y0 - dy)
+    pt2 = (x0 + dx, y0 + dy)
+    cv2.line(img, pt1, pt2, color, 2)
+
+    # Annotate angle
+    text_pos = (x0 + 5, y0 - 10)
+    cv2.putText(img, f"{label}{angle:.1f}°", text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+    return img
+
+
+
+
+
+if __name__ == "__main__":
+    # Hide the root Tk window
+    root = tk.Tk()
+    root.withdraw()
+
+    # Ask user to pick a folder instead of a single file
+    folder_path = filedialog.askdirectory(title="Select folder containing droplet images")
+    if not folder_path:
+        print("No folder selected, exiting.")
+        exit()
+
+    # Gather all image files in that folder
+    exts = (".jpg", ".jpeg", ".png", ".tif", ".bmp")
+    image_files = [os.path.join(folder_path, f)
+                   for f in os.listdir(folder_path)
+                   if f.lower().endswith(exts)]
+
+    if not image_files:
+        print("No image files found in the selected folder.")
+        exit()
+
+    # Process each image in turn
+    for image_path in image_files:
+        print(f"\nProcessing {os.path.basename(image_path)} …")
+        # This returns (ellipse_left, ellipse_right, roi_coords, full_image, cropped)
+        result = process_droplet_two_lobes(image_path)
+        if result is None:
+            continue
+
+        ellipse_left, ellipse_right, (x_min, y_min, x_max, y_max), image, cropped = result
+
+        # Compute top/bottom lines in cropped coords
+        roi_y_top = 0
+        roi_y_bottom = cropped.shape[0] - 1
+
+        # Extract contact angles
+        left_contacts = extract_all_contact_angles(ellipse_left, roi_y_top, roi_y_bottom, side='left')
+        right_contacts = extract_all_contact_angles(ellipse_right, roi_y_top, roi_y_bottom, side='right')
+
+        
+        
+        ys, xs_l, xs_r, curve_dist = compute_curve_distance(ellipse_left, ellipse_right, num_samples=300)
+
+        y_top, y_bot = 0, cropped.shape[0] - 1
+        dists = xs_r-xs_l
+        idx_min = np.argmin(dists)        # dists = xs_r - xs_l
+        y_closest = ys[idx_min]           # vertical coordinate of closest approach
+        x_l_closest = xs_l[idx_min]       # left‑curve x at that y
+        x_r_closest = xs_r[idx_min]       # right‑curve x at that y
+
+        # define origin = midpoint laterally, at the closest‑approach height
+        origin = ((x_l_closest + x_r_closest)/2, y_closest)
+
+        draw_debug_overlay(image, (x_min, y_min, x_max, y_max),
+                       ellipse_left, ellipse_right,
+                       left_contacts, right_contacts, origin)   
+
+
+        # transform both curves
+        Xl, Yl = transform_points_to_new_frame(xs_l, ys, origin)
+        Xr, Yr = transform_points_to_new_frame(xs_r, ys, origin)
+
+        # ————————————— Insert your new_contacts & dist_at_mid block right here —————————————
+        new_contacts = {}
+        for side, contacts in [("L", left_contacts), ("R", right_contacts)]:
+            for pos in ["top", "bottom"]:
+                pt = contacts[pos]["point"]
+                if pt is not None:
+                    Xn, Yn = transform_point_to_frame(pt, origin)
+                    new_contacts[f"{side}-{pos}"] = {"X": Xn, "Y": Yn}
+                else:
+                    new_contacts[f"{side}-{pos}"] = {"X": None, "Y": None}
+
+        
+        
+
+        i_l = np.argmin(np.abs(Xl))
+        i_r = np.argmin(np.abs(Xr))
+        dist_at_mid = {
+            "Left_curve":  Yl[i_l],
+            "Right_curve": Yr[i_r]
+        }
+
+
+        # Print numeric angles
+        for pos in ['top', 'bottom']:
+            l = left_contacts[pos]['angle_deg']
+            r = right_contacts[pos]['angle_deg']
+            
+
+        # 1) Header
+        print(f"\n=== {os.path.basename(image_path)} ===")
+
+        # 2) Closest‑approach & origin
+        print(f"Closest approach at y = {y_closest:.1f}px, gap = {dists[idx_min]:.1f}px")
+        print(f"→ Origin set to (x₀, y₀) = ({origin[0]:.1f}, {origin[1]:.1f})")
+
+        # 4) Transformed intersection points
+        print("\nIntersection points in rotated frame (X↑, Y→):")
+        for side, contacts in [("L", left_contacts), ("R", right_contacts)]:
+            for pos in ["top", "bottom"]:
+                pt = contacts[pos]["point"]
+                label = f"{side}-{pos}"
+                if pt is not None:
+                    Xn, Yn = transform_point_to_frame(pt, origin)
+                    print(f"  {label}: (X, Y) = ({Xn:.1f}, {Yn:.1f})")
+                else:
+                    print(f"  {label}: None")
+
+        # 5) Contact angles
+        print("\nContact angles (degrees):")
+        for side, contacts in [("L", left_contacts), ("R", right_contacts)]:
+            for pos in ["top", "bottom"]:
+                ang = contacts[pos]["angle_deg"]
+                label = f"{side}-{pos}"
+                if ang is not None:
+                    print(f"  {label}: {ang:+.2f}°")
+                else:
+                    print(f"  {label}: None")
+
+        # 6) Lateral distances at X=0
+        i_l = np.argmin(np.abs(Xl))
+        i_r = np.argmin(np.abs(Xr))
+        print("\nLateral distance at X=0 (mid‑plane):")
+
+
+        img = image.copy()
+        half_width = (x_max - x_min) // 2
+        # Left top/bottom
+        img = draw_contact_angle_debug(img, left_contacts['top'], (x_min, y_min), (255, 0, 0), 0, "L-T: ")
+        img = draw_contact_angle_debug(img, left_contacts['bottom'], (x_min, y_min), (255, 0, 0), 0, "L-B: ")
+
+        # Right top/bottom
+        img = draw_contact_angle_debug(img, right_contacts['top'], (x_min, y_min), (0, 255, 0), 0, "R-T: ")
+        img = draw_contact_angle_debug(img, right_contacts['bottom'], (x_min, y_min), (0, 255, 0), 0, "R-B: ")
+        cv2.line(img, (100, 100), (100 + 50, 100), (255, 255, 0), 2)  # should go right
+        cv2.line(img, (100, 100), (100, 100 + 50), (0, 255, 255), 2)  # should go down
+
+        plt.figure(figsize=(10, 6))
+        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        plt.title("Contact Points with Tangent Angles")
+        plt.axis('off')
+        plt.show()
+            
+
+
+
+
+
+
+

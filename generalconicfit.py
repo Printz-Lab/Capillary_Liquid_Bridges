@@ -271,26 +271,39 @@ def ransac_filter_std(points,
 
     return np.array(xs), np.array(ys)
 
-def get_intersections_with_y(conic, y):
-    """
-    Solve A x^2 + B x y + C y^2 + D x + E y + F = 0
-    for x, given this fixed y. Returns a list of real x-values.
-    """
+def get_intersections_with_y(conic, y_val):
+    """Solve for x at a given y, with numerical stability checks."""
     A, B, C, D, E, F = conic['coeffs']
-    # Quadratic in x: a x^2 + b x + c = 0
     a = A
-    b = B * y + D
-    c = C * (y**2) + E * y + F
+    b = B * y_val + D
+    c = C * (y_val**2) + E * y_val + F
 
-    # Discriminant
-    disc = b*b - 4*a*c
-    if abs(a) < SMALL or disc < 0:
-        return []   # no real intersections
-
+    # Handle near-linear cases first
+    if abs(a) < 1e-10:
+        if abs(b) < 1e-10:
+            return []  # No solution
+        x = -c / b
+        return [x]
+    
+    disc = b**2 - 4*a*c
+    if disc < 0:
+        return []  # No real roots
+    
     sqrt_d = np.sqrt(disc)
-    x1 = (-b + sqrt_d) / (2*a)
-    x2 = (-b - sqrt_d) / (2*a)
-    return [x1, x2]
+    # Use numerically stable quadratic formula
+    if b >= 0:
+        x1 = (-b - sqrt_d) / (2*a)
+        x2 = (2*c) / (-b - sqrt_d)
+    else:
+        x1 = (2*c) / (-b + sqrt_d)
+        x2 = (-b + sqrt_d) / (2*a)
+    
+    # Filter valid solutions (within image bounds)
+    valid = []
+    for x in [x1, x2]:
+        if 0 <= x < 10000:  # Adjust based on your image width
+            valid.append(x)
+    return valid
 
 def process_image(image_path):
     image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -453,19 +466,50 @@ def process_image(image_path):
             F2 = A*x0*x0 + B*x0*y0 + C*y0*y0 + D*x0 + E*y0 + F
             d['trans_coefs'] = (A2, B2, C2, D2, E2, F2)
 
-            # --- replace your get_intersections call with the debug‐tolerant one ---
+            # Replace the fallback code in your processing loop with:
             y_edge = y0_roi + h
-            xs_bot = get_intersections_with_y(conic, y_edge)
+            xs_bot = []
+            if not xs_bot:
+                # Find closest y with valid intersection
+                search_ysteps = np.linspace(y_max, y_edge, 50)
+                for y_search in search_ysteps:
+                    xs_test = get_intersections_with_y(conic, y_search)
+                    if xs_test:
+                        x_bot_plate = max(xs_test) if side == 'right' else min(xs_test)
+                        bottom_pt = (x_bot_plate, y_search)
+                        break
+                else:  # Fallback to parameteric conic equation
+                    t = np.linspace(0, 2*np.pi, 100)
+                    # Use parametric form based on conic type
+                    if conic['type'] == TYPE_HYPERBOLA:
+                        x_vals = conic['axes'][0] * np.cosh(t)
+                        y_vals = conic['axes'][1] * np.sinh(t)
+                    else:  # Ellipse
+                        x_vals = conic['axes'][0] * np.cos(t)
+                        y_vals = conic['axes'][1] * np.sin(t)
+                    # Rotate and translate points
+                    rotated = np.vstack([x_vals, y_vals]).T @ conic['diagonalizer']
+                    translated = rotated + conic['center']
+                    # Find point closest to plate
+                    plate_y = y_edge
+                    idx = np.argmin(np.abs(translated[:,1] - plate_y))
+                    bottom_pt = (translated[idx,0], translated[idx,1])
+                    
             if xs_bot:
-                x_bot_plate = max(xs_bot) if side == 'right' else min(xs_bot)
-                bottom_pt   = (x_bot_plate, y_edge)
-                print(f"[OK] conic→plate intersection: {bottom_pt}")
+                xs_bot_plate = max(xs_bot) if side == 'right' else min(xs_bot)
+                bottom_pt = (x_bot_plate, y_edge)
+                print(f"[OK] Conic intersects plate at {bottom_pt}")
             else:
-                # 2) Fallback via tangent‐line extrapolation
-                m = -g_bot[0] / g_bot[1]
-                x_bot_plate = x_bot + ((y_edge) - y_max) / m
-                bottom_pt   = (x_bot_plate, y_edge)
-                print(f"[FALLBACK] tangent→plate intersection: {bottom_pt}")
+                # Fallback 1: Tangent extrapolation
+                try:
+                    m = -g_bot[0] / g_bot[1]
+                    x_bot_plate = x_bot + ((y_edge) - y_max) / m
+                    bottom_pt = (x_bot_plate, y_edge)
+                    print(f"[FALLBACK 1] Tangent extrapolation: {bottom_pt}")
+                except:
+                    # Fallback 2: Use bottom-most inlier point
+                    bottom_pt = (xs_bot, y_max)
+                    print(f"[FALLBACK 2] Using bottom-most inlier: {bottom_pt}")
 
             # 3) Now append everything in one go (preserving 'conic')
             output_data.append({
@@ -526,6 +570,30 @@ def process_image(image_path):
         txt = f"Neck width: {neck_width:.2f}px"
         cv2.putText(output, txt, (int(ox)+10, int(oy)-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2)
+
+
+                    # After conic fitting, add:
+        if True:  # Debug visualization
+            # Draw predicted conic
+            t = np.linspace(-3, 3, 100)
+            if conic['type'] == TYPE_HYPERBOLA:
+                x = conic['axes'][0] * np.cosh(t)
+                y = conic['axes'][1] * np.sinh(t)
+            else:
+                x = conic['axes'][0] * np.cos(t)
+                y = conic['axes'][1] * np.sin(t)
+            
+            # Transform points
+            pts = np.vstack([x, y]).T @ conic['diagonalizer'] + conic['center']
+            pts = pts.astype(int)
+            
+            # Draw on image
+            for pt in pts:
+                if 0 <= pt[0] < output.shape[1] and 0 <= pt[1] < output.shape[0]:
+                    cv2.circle(output, tuple(pt), 1, (0,255,255), -1)
+            
+            cv2.imshow("Conic Debug", output)
+            cv2.waitKey(1000)
 
         # 8) print all the values to console
         print("=== Results ===")
