@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import tkinter as tk
 from tkinter import filedialog
+import pandas as pd
 
 def select_roi(image):
     print("Select ROI and press ENTER or SPACE. Press ESC to cancel.")
@@ -349,6 +350,8 @@ if __name__ == "__main__":
         print("No image files found.")
         exit()
 
+    results = []
+
     # Process images
     for image_path in image_files:
         print(f"\nProcessing {os.path.basename(image_path)}…")
@@ -369,6 +372,44 @@ if __name__ == "__main__":
         if not origin:
             print("Skipping distance calculations")
             continue
+
+        data = {
+                    "filename": os.path.basename(image_path),
+                    "left_top_angle": None,
+                    "left_top_Y": None,
+                    "left_top_X": None,
+                    "left_bottom_angle": None,
+                    "left_bottom_Y": None,
+                    "left_bottom_X": None,
+                    "right_top_angle": None,
+                    "right_top_Y": None,
+                    "right_top_X": None,
+                    "right_bottom_angle": None,
+                    "right_bottom_Y": None,
+                    "right_bottom_X": None,
+                    "Y_star": None
+                }
+        Ystar = min_dist/2 if min_dist else None
+        data["Y_star"] = Ystar
+
+        # Process contact points and angles
+        def process_contacts(contacts, side, origin):
+            for pos in ['top', 'bottom']:
+                contact = contacts.get(pos, {})
+                if contact['point'] is not None and contact['angle_deg'] is not None:
+                    # Transform coordinates
+                    Xn, Yn = transform_point_to_frame(contact['point'], origin)
+                    # Store values with absolute angle
+                    data[f"{side}_{pos}_angle"] = abs(contact['angle_deg'])
+                    data[f"{side}_{pos}_Y"] = Yn
+                    data[f"{side}_{pos}_X"] = Xn
+
+        if origin:
+            process_contacts(left_contacts, 'left', origin)
+            process_contacts(right_contacts, 'right', origin)
+
+        results.append(data)
+        
 
         # Transform coordinates
         pts_l = ellipse_to_points(*ellipse_left)
@@ -433,21 +474,24 @@ if __name__ == "__main__":
                         x_roi, y_roi = pt  # Explicit unpacking
                         Xn, Yn = transform_point_to_frame((x_roi, y_roi), origin)
                         
-                        print(f"  Image Coordinates: ({x_roi+x_min:.1f}, {y_roi+y_min:.1f})")
+                        # print(f"  Image Coordinates: ({x_roi+x_min:.1f}, {y_roi+y_min:.1f})")
                         print(f"  Transformed System: (X={Xn:.1f}, Y={Yn:.1f})")
                     
                     except (ValueError, TypeError) as e:
                         print(f"  Transformation error: {str(e)}")
                 
                 if angle is not None:
-                    print(f"  Angle: {angle:+.1f}°")
+                    absangle = abs(angle)
+                    print(f"  Angle: {absangle:+.1f}°")
                 else:
                     print("  Angle: Could not be calculated")
         
-        # Geometric measurements
-        Ystar = min_dist/2
+        
         print("\nGeometric Analysis:")
         print(f"Y* (neck width): {Ystar:.2f} px")
         print(f"System origin: ({origin_full[0]:.1f}, {origin_full[1]:.1f})")
+
+    
+        
 
         
