@@ -149,7 +149,7 @@ def contact_angle_at_index(points, index, side='left', label='top'):
     dy = p2[1] - p1[1]
     angle_rad = np.arctan2(np.abs(dy), np.abs(dx))
     angle_deg = np.rad2deg(angle_rad)
-    print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
+    # print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
     # Flip convention for left side
     if side == 'left' and label == 'top' or side == 'right' and label == 'bottom':
         angle_deg = -angle_deg
@@ -235,28 +235,36 @@ def draw_debug_overlay(full_image, roi_coords, ellipse_left=None, ellipse_right=
     plt.axis('off')
     plt.show()
 
-def compute_curve_distance(ellipse_left, ellipse_right, num_samples=200):
+def compute_curve_distance(ellipse_left, ellipse_right, num_samples=500):
+    # Generate points for both ellipses
     pts_l = ellipse_to_points(*ellipse_left)
     pts_r = ellipse_to_points(*ellipse_right)
-
-    # restrict to overlapping y‑range
-    y0 = max(pts_l[:,1].min(), pts_r[:,1].min())
-    y1 = min(pts_l[:,1].max(), pts_r[:,1].max())
-    ys = np.linspace(y0, y1, num_samples)
-
-    # sort left points by y
-    idx_l = np.argsort(pts_l[:,1])
-    y_l_sorted = pts_l[idx_l, 1]
-    x_l_sorted = pts_l[idx_l, 0]
-    xs_l = np.interp(ys, y_l_sorted, x_l_sorted)
-
-    # sort right points by y
-    idx_r = np.argsort(pts_r[:,1])
-    y_r_sorted = pts_r[idx_r, 1]
-    x_r_sorted = pts_r[idx_r, 0]
-    xs_r = np.interp(ys, y_r_sorted, x_r_sorted)
-
-    return ys, xs_l, xs_r, xs_r - xs_l
+    
+    # Find pair of closest points between the curves
+    min_dist = float('inf')
+    closest_pair = None
+    
+    # Brute-force search for closest points (optimize this if needed)
+    for pl in pts_l:
+        for pr in pts_r:
+            dx = pl[0] - pr[0]
+            dy = pl[1] - pr[1]
+            dist = dx*dx + dy*dy  # Squared distance for efficiency
+            if dist < min_dist:
+                min_dist = dist
+                closest_pair = (pl, pr)
+    
+    if closest_pair is None:
+        return None, None, None, None
+    
+    # Set origin as midpoint between closest points
+    left_pt, right_pt = closest_pair
+    origin = (
+        (left_pt[0] + right_pt[0])/2, 
+        (left_pt[1] + right_pt[1])/2
+    )
+    
+    return origin, left_pt, right_pt, np.sqrt(min_dist)
 
 def transform_points_to_new_frame(xs, ys, origin):
     ox, oy = origin
@@ -325,149 +333,121 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.withdraw()
 
-    # Ask user to pick a folder instead of a single file
+    # Ask user to pick a folder
     folder_path = filedialog.askdirectory(title="Select folder containing droplet images")
     if not folder_path:
         print("No folder selected, exiting.")
         exit()
 
-    # Gather all image files in that folder
+    # Gather image files
     exts = (".jpg", ".jpeg", ".png", ".tif", ".bmp")
-    image_files = [os.path.join(folder_path, f)
-                   for f in os.listdir(folder_path)
+    image_files = [os.path.join(folder_path, f) 
+                   for f in os.listdir(folder_path) 
                    if f.lower().endswith(exts)]
 
     if not image_files:
-        print("No image files found in the selected folder.")
+        print("No image files found.")
         exit()
 
-    # Process each image in turn
+    # Process images
     for image_path in image_files:
-        print(f"\nProcessing {os.path.basename(image_path)} …")
-        # This returns (ellipse_left, ellipse_right, roi_coords, full_image, cropped)
+        print(f"\nProcessing {os.path.basename(image_path)}…")
         result = process_droplet_two_lobes(image_path)
-        if result is None:
+        if not result:
             continue
 
+        # Unpack results
         ellipse_left, ellipse_right, (x_min, y_min, x_max, y_max), image, cropped = result
+        roi_height, roi_width = y_max-y_min, x_max-x_min
 
-        # Compute top/bottom lines in cropped coords
-        roi_y_top = 0
-        roi_y_bottom = cropped.shape[0] - 1
+        # Contact angle analysis
+        left_contacts = extract_all_contact_angles(ellipse_left, 0, cropped.shape[0]-1, 'left')
+        right_contacts = extract_all_contact_angles(ellipse_right, 0, cropped.shape[0]-1, 'right')
 
-        # Extract contact angles
-        left_contacts = extract_all_contact_angles(ellipse_left, roi_y_top, roi_y_bottom, side='left')
-        right_contacts = extract_all_contact_angles(ellipse_right, roi_y_top, roi_y_bottom, side='right')
+        # Geometric analysis
+        origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
+        if not origin:
+            print("Skipping distance calculations")
+            continue
 
+        # Transform coordinates
+        pts_l = ellipse_to_points(*ellipse_left)
+        pts_r = ellipse_to_points(*ellipse_right)
+        Xl, Yl = transform_points_to_new_frame(pts_l[:,0], pts_l[:,1], origin)
+        Xr, Yr = transform_points_to_new_frame(pts_r[:,0], pts_r[:,1], origin)
+
+        # Generate debug visualization
+        debug_img = image.copy()
         
+        # Draw fitted ellipses on full image
+        if ellipse_left is not None:
+            (lx, ly), (lma, lmi), lang = ellipse_left
+            cv2.ellipse(debug_img, 
+                        (int(lx+x_min), int(ly+y_min)),
+                        (int(lma/2), int(lmi/2)),
+                        lang, 0, 360, (0,0,255), 2)
+
+        if ellipse_right is not None:
+            (rx, ry), (rma, rmi), rang = ellipse_right
+            cv2.ellipse(debug_img, 
+                        (int(rx+x_min), int(ry+y_min)),
+                        (int(rma/2), int(rmi/2)),
+                        rang, 0, 360, (255,0,0), 2)
+
+        # Draw coordinate axes
+        origin_full = (int(origin[0]+x_min), int(origin[1]+y_min))
+        cv2.line(debug_img, (origin_full[0], y_min), (origin_full[0], y_max), (0,255,255), 2)
+        cv2.line(debug_img, (x_min, origin_full[1]), (x_max, origin_full[1]), (0,255,255), 2)
         
-        ys, xs_l, xs_r, curve_dist = compute_curve_distance(ellipse_left, ellipse_right, num_samples=300)
+        # Draw contact points and angles
+        debug_img = draw_contact_angle_debug(debug_img, left_contacts['top'], (x_min,y_min), (255,0,0), 0, "L-T: ")
+        debug_img = draw_contact_angle_debug(debug_img, left_contacts['bottom'], (x_min,y_min), (255,0,0), 0, "L-B: ")
+        debug_img = draw_contact_angle_debug(debug_img, right_contacts['top'], (x_min,y_min), (0,255,0), 0, "R-T: ")
+        debug_img = draw_contact_angle_debug(debug_img, right_contacts['bottom'], (x_min,y_min), (0,255,0), 0, "R-B: ")
 
-        y_top, y_bot = 0, cropped.shape[0] - 1
-        dists = xs_r-xs_l
-        idx_min = np.argmin(dists)        # dists = xs_r - xs_l
-        y_closest = ys[idx_min]           # vertical coordinate of closest approach
-        x_l_closest = xs_l[idx_min]       # left‑curve x at that y
-        x_r_closest = xs_r[idx_min]       # right‑curve x at that y
-
-        # define origin = midpoint laterally, at the closest‑approach height
-        origin = ((x_l_closest + x_r_closest)/2, y_closest)
-
-        draw_debug_overlay(image, (x_min, y_min, x_max, y_max),
-                       ellipse_left, ellipse_right,
-                       left_contacts, right_contacts, origin)   
-
-
-        # transform both curves
-        Xl, Yl = transform_points_to_new_frame(xs_l, ys, origin)
-        Xr, Yr = transform_points_to_new_frame(xs_r, ys, origin)
-
-        # ————————————— Insert your new_contacts & dist_at_mid block right here —————————————
-        new_contacts = {}
-        for side, contacts in [("L", left_contacts), ("R", right_contacts)]:
-            for pos in ["top", "bottom"]:
-                pt = contacts[pos]["point"]
-                if pt is not None:
-                    Xn, Yn = transform_point_to_frame(pt, origin)
-                    new_contacts[f"{side}-{pos}"] = {"X": Xn, "Y": Yn}
-                else:
-                    new_contacts[f"{side}-{pos}"] = {"X": None, "Y": None}
-
-        
-        
-
-        i_l = np.argmin(np.abs(Xl))
-        i_r = np.argmin(np.abs(Xr))
-        dist_at_mid = {
-            "Left_curve":  Yl[i_l],
-            "Right_curve": Yr[i_r]
-        }
-
-
-        # Print numeric angles
-        for pos in ['top', 'bottom']:
-            l = left_contacts[pos]['angle_deg']
-            r = right_contacts[pos]['angle_deg']
-            
-
-        # 1) Header
-        print(f"\n=== {os.path.basename(image_path)} ===")
-
-        # 2) Closest‑approach & origin
-        print(f"Closest approach at y = {y_closest:.1f}px, gap = {dists[idx_min]:.1f}px")
-        print(f"→ Origin set to (x₀, y₀) = ({origin[0]:.1f}, {origin[1]:.1f})")
-
-        # 4) Transformed intersection points
-        print("\nIntersection points in rotated frame (X↑, Y→):")
-        for side, contacts in [("L", left_contacts), ("R", right_contacts)]:
-            for pos in ["top", "bottom"]:
-                pt = contacts[pos]["point"]
-                label = f"{side}-{pos}"
-                if pt is not None:
-                    Xn, Yn = transform_point_to_frame(pt, origin)
-                    print(f"  {label}: (X, Y) = ({Xn:.1f}, {Yn:.1f})")
-                else:
-                    print(f"  {label}: None")
-
-        # 5) Contact angles
-        print("\nContact angles (degrees):")
-        for side, contacts in [("L", left_contacts), ("R", right_contacts)]:
-            for pos in ["top", "bottom"]:
-                ang = contacts[pos]["angle_deg"]
-                label = f"{side}-{pos}"
-                if ang is not None:
-                    print(f"  {label}: {ang:+.2f}°")
-                else:
-                    print(f"  {label}: None")
-
-        # 6) Lateral distances at X=0
-        i_l = np.argmin(np.abs(Xl))
-        i_r = np.argmin(np.abs(Xr))
-        print("\nLateral distance at X=0 (mid‑plane):")
-
-
-        img = image.copy()
-        half_width = (x_max - x_min) // 2
-        # Left top/bottom
-        img = draw_contact_angle_debug(img, left_contacts['top'], (x_min, y_min), (255, 0, 0), 0, "L-T: ")
-        img = draw_contact_angle_debug(img, left_contacts['bottom'], (x_min, y_min), (255, 0, 0), 0, "L-B: ")
-
-        # Right top/bottom
-        img = draw_contact_angle_debug(img, right_contacts['top'], (x_min, y_min), (0, 255, 0), 0, "R-T: ")
-        img = draw_contact_angle_debug(img, right_contacts['bottom'], (x_min, y_min), (0, 255, 0), 0, "R-B: ")
-        cv2.line(img, (100, 100), (100 + 50, 100), (255, 255, 0), 2)  # should go right
-        cv2.line(img, (100, 100), (100, 100 + 50), (0, 255, 255), 2)  # should go down
-
-        plt.figure(figsize=(10, 6))
-        plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        plt.title("Contact Points with Tangent Angles")
+        # Show results
+        plt.figure(figsize=(12,8))
+        plt.imshow(cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB))
+        plt.title("Analysis Results - Fitted Ellipses and Contact Points")
         plt.axis('off')
         plt.show()
-            
 
+        # Comprehensive printout
+        print(f"\n=== Results for {os.path.basename(image_path)} ===")
+        #transform contact points for below
 
+    
+        # Contact points and angles
+        print("\nIntersection Points and Angles:")
+        for side, contacts in [("Left", left_contacts), ("Right", right_contacts)]:
+            for pos in ["Top", "Bottom"]:
+                contact = contacts[pos.lower()]
+                pt = contact['point']
+                angle = contact['angle_deg']
+                
+                print(f"\n{side} {pos} Contact:")
+                
+                # Handle coordinates
+                if pt is not None:
+                    try:
+                        x_roi, y_roi = pt  # Explicit unpacking
+                        Xn, Yn = transform_point_to_frame((x_roi, y_roi), origin)
+                        
+                        print(f"  Image Coordinates: ({x_roi+x_min:.1f}, {y_roi+y_min:.1f})")
+                        print(f"  Transformed System: (X={Xn:.1f}, Y={Yn:.1f})")
+                    
+                    except (ValueError, TypeError) as e:
+                        print(f"  Transformation error: {str(e)}")
+                
+                if angle is not None:
+                    print(f"  Angle: {angle:+.1f}°")
+                else:
+                    print("  Angle: Could not be calculated")
+        
+        # Geometric measurements
+        Ystar = min_dist/2
+        print("\nGeometric Analysis:")
+        print(f"Y* (neck width): {Ystar:.2f} px")
+        print(f"System origin: ({origin_full[0]:.1f}, {origin_full[1]:.1f})")
 
-
-
-
-
+        
