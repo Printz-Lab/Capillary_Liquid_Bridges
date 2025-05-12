@@ -5,6 +5,9 @@ import os
 import tkinter as tk
 from tkinter import filedialog
 import pandas as pd
+from scipy.integrate import quad
+import matplotlib as mpl
+import matplotlib.lines as mlines
 
 def select_roi(image):
     print("Select ROI and press ENTER or SPACE. Press ESC to cancel.")
@@ -325,6 +328,118 @@ def draw_contact_angle_debug(full_image, contact, roi_origin, color, half_width_
 
     return img
 
+################################## - NODOID - ############################################################################################################################################
+def classify_bridge(y, yc1, yc2, theta1, theta2):
+    yc1_sin = yc1 * np.sin(theta1)
+    yc2_sin = yc2 * np.sin(theta2)
+    
+    if max(yc1_sin, yc2_sin) < y < min(yc1, yc2):
+        return "nodoid"
+    elif 0 < y < min(yc1_sin, yc2_sin):
+        return "unduloid"
+    elif y == yc1_sin or y == yc2_sin:  
+        return "catenoid"
+    else:
+        return "unknown"
+    
+def integrand(u, e, epsilon=1e-8):
+    denominator = (e + np.cos(u)) * np.sqrt(e**2 - np.cos(u)**2 + epsilon)
+    return np.cos(u) / denominator
+
+def nodoid_param(t, a, b, num_points=100):
+    """Safe parameterization with validation"""
+    try:
+        # Parameter validation
+        if a <= 0 or b <= 0:
+            raise ValueError(f"Invalid parameters a={a}, b={b}")
+            
+        e = np.sqrt(a**2 + b**2)/a
+        if e <= 1:
+            raise ValueError(f"Invalid nodoid eccentricity e={e:.2f}")
+
+        y = b * np.sqrt((e - np.cos(t)) / (e + np.cos(t)))
+        x = np.zeros_like(t)
+        
+        # Vectorized integration
+        for i, ti in enumerate(t):
+            if ti < -np.pi/2 or ti > np.pi/2:
+                raise ValueError(f"Parameter t={ti:.2f} out of range")
+            x[i], _ = quad(integrand, 0, ti, args=(e,))
+            
+        x = (b**2/a) * x
+        return x, y
+        
+    except Exception as e:
+        print(f"Nodoid parameterization failed: {str(e)}")
+        return np.array([]), np.array([])  # Return empty arrays
+
+def unduloid_param(t, a, b, num_points=100):
+    e = np.sqrt(a**2 - b**2) / a
+    y = b * np.sqrt((1 - e * np.cos(t)) / (1 + e * np.cos(t)))
+    # Precompute integral values for efficiency
+    t_vals = np.linspace(0, t, num_points)
+    integrand_vals = 1 / ((1 + e * np.cos(t_vals)) * np.sqrt(1 - (e**2) * np.cos(t_vals)**2))
+    x = (b**2 / a) * np.trapz(integrand_vals, t_vals)
+    return x, y
+
+def calculate_parameters(bridge_type, y, yc1, yc2, theta1, theta2):
+    if bridge_type == "nodoid":
+        a = 0.5 * ( (yc1**2 - y**2)/(y - yc1*np.sin(theta1)) )
+        b_sq = y * yc1 * (yc1 - y*np.sin(theta1)) / (y - yc1*np.sin(theta1))
+        return a, np.sqrt(b_sq)
+    elif bridge_type == "unduloid":
+        a = 0.5 * ( (yc1**2 - y**2)/(yc1*np.sin(theta1) - y) )
+        b_sq = y * yc1 * (yc1 - y*np.sin(theta1)) / (yc1*np.sin(theta1) - y)
+        return a, np.sqrt(b_sq)
+    else:
+        return None, None
+    
+def transform_to_image_coords(x_param, y_param, origin, roi_coords):
+    """With validation checks"""
+    x_shift = origin[0] + roi_coords[0]
+    y_shift = origin[1] + roi_coords[1]
+    
+    # Convert to numpy arrays for vectorization
+    x_img = np.asarray(x_param) + x_shift
+    y_img = y_shift - np.asarray(y_param)
+    
+    # Check bounds
+    if (np.min(x_img) < 0) or (np.max(x_img) > roi_coords[2]):
+        print(f"X coordinates out of bounds: {np.min(x_img):.1f}-{np.max(x_img):.1f}")
+    if (np.min(y_img) < 0) or (np.max(y_img) > roi_coords[3]):
+        print(f"Y coordinates out of bounds: {np.min(y_img):.1f}-{np.max(y_img):.1f}")
+    
+    return x_img, y_img
+
+def draw_theoretical_curve(ax, bridge_type, a, b, origin, roi_coords):
+    """Safe plotting with empty data checks"""
+    if bridge_type not in ["nodoid", "unduloid"]:
+        return None
+    
+    try:
+        t = np.linspace(-np.pi/2, np.pi/2, 100)
+        
+        if bridge_type == "nodoid":
+            x, y = nodoid_param(t, a, b)
+        else:
+            x, y = unduloid_param(t, a, b)
+
+        # Critical check for valid data
+        if len(x) == 0 or len(y) == 0:
+            print(f"No valid {bridge_type} points to plot")
+            return None
+
+        x_img, y_img = transform_to_image_coords(x, y, origin, roi_coords)
+        
+        # Safe line creation
+        lines = ax.plot(x_img, y_img, 'r--', linewidth=2, 
+                       label=f'Theoretical {bridge_type}')
+        
+        return lines[0] if lines else None
+    
+    except Exception as e:
+        print(f"Plotting error: {str(e)}")
+        return None
 
 
 
@@ -387,10 +502,10 @@ if __name__ == "__main__":
                     "right_bottom_angle": None,
                     "right_bottom_Y": None,
                     "right_bottom_X": None,
-                    "Y_star": None
+                    "y": None
                 }
         Ystar = min_dist/2 if min_dist else None
-        data["Y_star"] = Ystar
+        data["y"] = Ystar
 
         # Process contact points and angles
         def process_contacts(contacts, side, origin):
@@ -489,9 +604,58 @@ if __name__ == "__main__":
         
         print("\nGeometric Analysis:")
         print(f"Y* (neck width): {Ystar:.2f} px")
-        print(f"System origin: ({origin_full[0]:.1f}, {origin_full[1]:.1f})")
+        print(f"Image origin: ({origin_full[0]:.1f}, {origin_full[1]:.1f})")
 
-    
+        ###############################################################################################################################
+
+        # Solve for a and b using both contact points' equations
         
 
-        
+        # Known values from image analysis (using absolute values for angles)
+        y = data['y']
+        side = 'right'  # Try with left side first
+        yc1 = data[f'{side}_top_Y']
+        yc2 = data[f'{side}_bottom_Y']
+        theta1 = np.deg2rad(abs(data[f'{side}_top_angle']))  # Absolute value for angle direction
+        theta2 = np.deg2rad(abs(data[f'{side}_bottom_angle']))
+
+        # After contact angle calculation
+        bridge_type = classify_bridge(y, yc1, yc2, np.radians(theta1), np.radians(theta2))
+        a, b = calculate_parameters(bridge_type, y, yc1, yc2, np.radians(theta1), np.radians(theta2))
+
+      
+        # Get experimental points for error calculation
+        pts_experimental = np.vstack([pts_l, pts_r])
+
+        # Enhanced visualization
+        # In your main processing loop:
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+        # Store all plottable artists
+        # In your main processing loop:
+        # In your plotting section:
+        artists = []
+        theory_line = draw_theoretical_curve(ax, bridge_type, a, b, origin, (x_min, y_min))
+
+        if theory_line:  # Only add if valid
+            artists.append(theory_line)
+
+        # Add experimental points
+        exp_points = ax.scatter(pts_experimental[:,0], pts_experimental[:,1], 
+                            c='blue', s=10, label='Experimental')
+        artists.append(exp_points)
+
+        # Create legend only if we have entries
+        if artists:
+            ax.legend(handles=artists)
+        else:
+            ax.text(0.5, 0.5, 'No Valid Theoretical Curve', 
+                ha='center', va='center', transform=ax.transAxes)
+
+        plt.show()
+        # After parameter calculation
+        print(f"Bridge type: {bridge_type}")
+        print(f"Parameters: a={a:.2f}, b={b:.2f}")
+        print(f"ROI coords: x={x_min}-{x_max}, y={y_min}-{y_max}")
+        print(f"Origin point: {origin_full}")
