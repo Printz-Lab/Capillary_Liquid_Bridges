@@ -3,19 +3,19 @@ import os
 import glob
 import numpy as np
 # Define the input folder and output folder
-input_folder = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\Anton's snapshots\Snapshots\APTMS Top\aa"  # Replace with the path to your folder containing .tif files
-output_folder = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\Anton's snapshots\APTMS Filtered" # Replace with the folder where you want to save the edge images
+input_folder = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\4-15\s1\selected"  # Replace with the path to your folder containing .tif files
+output_folder = r"C:\Users\ezrap\OneDrive\Documents\Spring 2025 HW\Printz Lab Research\Capillary Bridging\Anton's snapshots\APTMS Top" # Replace with the folder where you want to save the edge images
 
 # Ensure the output directory exists, create if not
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # Get all .tif files in the input folder
-tif_files = sorted(glob.glob(os.path.join(input_folder, "*.png"))) #change whether its tif or png or jpg
+tif_files = sorted(glob.glob(os.path.join(input_folder, "*.tif"))) #change whether its tif or png or jpg
 
 # Parameters for Canny edge detection
-t_lower = 50  # Lower Threshold
-t_upper = 100  # Upper Threshold
+t_lower = 150     # Lower Threshold
+t_upper = 230  # Upper Threshold
 
 # Process each image in the folder
 for tif_file in tif_files:
