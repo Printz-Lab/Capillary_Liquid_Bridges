@@ -267,7 +267,7 @@ def contact_angle_at_index(points, index, side="left", label="top"):
     return angle_deg
 
 
-def find_contact_point_on_line_half(points, line_y, side="right", tolerance=5):
+def find_contact_point_on_line_half(points, line_y, side="right", tolerance=10):
     # Get center x to split
     center_x = np.mean(points[:, 0])
     if side == "right":
@@ -294,8 +294,9 @@ def extract_all_contact_angles(ellipse, roi_y_top, roi_y_bottom, side="left"):
 
     for label, line_y in [("top", roi_y_top), ("bottom", roi_y_bottom)]:
         side_selector = "right" if side == "left" else "left"  # inward-facing side
-        idx, pt = find_contact_point_on_line_half(points, line_y, side_selector)
-        if pt is not None:
+        res = find_contact_point_on_line_half(points, line_y, side_selector)
+        if res is not None:
+            idx, pt = res
             ang = contact_angle_at_index(points, idx, side, label)
             result[label] = {"point": pt, "angle_deg": ang}
         else:
@@ -303,17 +304,54 @@ def extract_all_contact_angles(ellipse, roi_y_top, roi_y_bottom, side="left"):
 
     return result
 
+def get_meridonal_profile_new(points, contacts, side):
+    """
+    Extract the meridional profile points from an ellipse fit.
+    """
+    top_contact = contacts["top"]['point']
+    bottom_contact = contacts["bottom"]['point']
+
+    # Skip if either point is missing
+    if top_contact is None or bottom_contact is None:
+        return np.empty((0, 2))  # return empty array to skip this profile
+
+    if side == 'left':
+        mask = (
+            (points[:, 0] > min(top_contact[0], bottom_contact[0])) &
+            (points[:, 1] > top_contact[1]) &
+            (points[:, 1] < bottom_contact[1])
+        )
+    elif side == 'right':
+        mask = (
+            (points[:, 0] < max(top_contact[0], bottom_contact[0])) &
+            (points[:, 1] > top_contact[1]) &
+            (points[:, 1] < bottom_contact[1])
+        )
+    else:
+        raise ValueError("side must be 'left' or 'right'")
+
+    return points[mask]
+
 def get_meriodonal_profile(points, contacts, side):
+    points = np.array(points)
     if side == "left":
         # Left side: use the leftmost points
-        top_contact = contacts["top"]['point'][0]
-        bottom_contact = contacts['bottom']['point'][0]
-        profile_points = points[points[:, 0] < max(top_contact[0], bottom_contact[0]) & points[:, 1] < top_contact[1] & points[:, 1] > bottom_contact[1]]
+        top_contact = contacts["top"]['point']
+        bottom_contact = contacts['bottom']['point']
+        profile_points = points[
+            (points[:, 0] <= max(top_contact[0], bottom_contact[0])) &
+             (points[:, 1] <= top_contact[1]) & 
+            (points[:, 1] >= bottom_contact[1])
+             ]
     if side == 'right':
         # Right side: use the rightmost points
-        top_contact = contacts["top"]['point'][0]
-        bottom_contact = contacts['bottom']['point'][0]
-        profile_points = points[points[:, 0] > min(top_contact[0], bottom_contact[0]) & points[:, 1] < top_contact[1] & points[:, 1] > bottom_contact[1]]
+        top_contact = contacts["top"]['point']
+        bottom_contact = contacts['bottom']['point']
+        profile_points = points[
+            (points[:, 0] >= min(top_contact[0], bottom_contact[0])) &
+            (points[:, 1] <= top_contact[1]) & 
+            (points[:, 1] >= bottom_contact[1])
+            ]
     
     return profile_points
 
@@ -340,6 +378,19 @@ def draw_meriodonal_profile(
     plt.title(f"Meriodonal Profile on {side} Side")
     plt.axis("off")
     plt.show()
+
+# Utility to fit circle from y-cropped contour
+def fit_circle_to_contour_near_y(contour, y0, y_margin=50):
+    pts = contour.reshape(-1, 2)
+    subset = pts[np.abs(pts[:, 1] - y0) < y_margin]
+    if len(subset) >= 3:
+        A = np.c_[2 * subset[:, 0], 2 * subset[:, 1], np.ones(len(subset))]
+        b = subset[:, 0]**2 + subset[:, 1]**2
+        sol, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        xc, yc, c = sol
+        radius = np.sqrt(c + xc**2 + yc**2)
+        return (xc, yc), radius
+    return None, None
 
 
 def draw_debug_overlay(
@@ -445,12 +496,21 @@ def compute_curve_distance(ellipse_left, ellipse_right, num_samples=500):
     return origin, left_pt, right_pt, np.sqrt(min_dist)
 
 
-def transform_points_to_new_frame(xs, ys, origin):
+def transform_points_to_new_frame(xs, ys, origin, angle_deg=0):
     ox, oy = origin
     # new X = (y - oy)   (vertical displ)
     # new Y = (x - ox)   (lateral displ)
     X_new = ys - oy
     Y_new = xs - ox
+
+    # Apply rotation if angle is specified
+    if angle_deg != 0:
+        angle_rad = np.deg2rad(angle_deg)
+        cos_angle = np.cos(angle_rad)
+        sin_angle = np.sin(angle_rad)
+        X_new_rotated = X_new * cos_angle - Y_new * sin_angle
+        Y_new_rotated = X_new * sin_angle + Y_new * cos_angle
+        X_new, Y_new = X_new_rotated, Y_new_rotated
     return X_new, Y_new
 
 

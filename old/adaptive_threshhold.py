@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, RadioButtons
 import tkinter as tk
 from tkinter import filedialog
-from cv2ellipse import *
+from SAM_FIles.cv2ellipse import *
 
 def adaptive_threshold_with_contours_viewer(image_bgr):
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)

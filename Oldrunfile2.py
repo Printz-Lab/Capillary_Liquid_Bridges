@@ -26,11 +26,17 @@ if not image_path:
 results = []
 
 # Process images
+
+
+# %%
 print(f"\nProcessing {os.path.basename(image_path)}…")
-result = process_droplet_two_lobes(image_path, roi_type="auto")
+result = process_droplet_two_lobes(image_path, roi_type="manual", canny_thresh=(20,20))
 if not result:
     print(f"stopping {os.path.basename(image_path)} due to processing failure.")
     exit()
+
+
+# %%
 
 # Unpack results
 ellipse_left, ellipse_right, (x_min, y_min, x_max, y_max), image, cropped = result
@@ -40,27 +46,154 @@ roi_height, roi_width = y_max - y_min, x_max - x_min
 left_contacts = extract_all_contact_angles(
     ellipse_left, 0, cropped.shape[0] - 1, "left"
 )
-left_meriodonal = get_meriodonal_profile(
-    ellipse_left, left_contacts, "left"
-)
+
 right_contacts = extract_all_contact_angles(
-    ellipse_right, right_contacts, "right"
-)
-right_meriodonal = get_meriodonal_profile(
-    ellipse_right, 0, cropped.shape[0] - 1, "right"
+    ellipse_right, 0, cropped.shape[0], "right"
 )
 
+
+
+# %%
+def get_meridonal_profile_new(points, contacts, side):
+    """
+    Extract the meridional profile points from an ellipse fit.
+    """
+    top_contact = contacts["top"]['point']
+    bottom_contact = contacts["bottom"]['point']
+
+    # Skip if either point is missing
+    if top_contact is None or bottom_contact is None:
+        return np.empty((0, 2))  # return empty array to skip this profile
+
+    if side == 'left':
+        mask = (
+            (points[:, 0] > min(top_contact[0], bottom_contact[0])) &
+            (points[:, 1] > top_contact[1]) &
+            (points[:, 1] < bottom_contact[1])
+        )
+    elif side == 'right':
+        mask = (
+            (points[:, 0] < max(top_contact[0], bottom_contact[0])) &
+            (points[:, 1] > top_contact[1]) &
+            (points[:, 1] < bottom_contact[1])
+        )
+    else:
+        raise ValueError("side must be 'left' or 'right'")
+
+    return points[mask]
+
+
+# %%
+ellipse_left_points = ellipse_to_points(*ellipse_left)
+ellipse_right_points = ellipse_to_points(*ellipse_right)
+
+# %%
+left_meriodonal = get_meridonal_profile_new(
+    ellipse_left_points, left_contacts, "left"
+)
+right_meriodonal = get_meridonal_profile_new(
+    ellipse_right_points, right_contacts, "right"
+)
+
+
+# %%
+left_meriodonal
+
+# %%
 draw_meriodonal_profile(
-    full_image= image.copy, roi_coords=(x_min, y_min, x_max, y_max), profile_points = left_meriodonal, side ="left"
+    full_image= image.copy(), roi_coords=(x_min, y_min, x_max, y_max), profile_points = left_meriodonal, side ="left"
 )
 draw_meriodonal_profile(
-    full_image= image.copy, roi_coords=(x_min, y_min, x_max, y_max), profile_points = right_meriodonal, side ="right"
+    full_image= image.copy(), roi_coords=(x_min, y_min, x_max, y_max), profile_points = right_meriodonal, side ="right"
 )
 
 print(f"Left contacts: {left_contacts}")
 print(f"Right contacts: {right_contacts}")
 # Geometric analysis
 origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
+
+# %%
+left_meriodonal
+
+# %%
+left_meriodonal_shifted = transform_points_to_new_frame(left_meriodonal[:,0], left_meriodonal[:,1], origin)
+right_meriodonal_shifted = transform_points_to_new_frame(right_meriodonal[:,0], right_meriodonal[:,1], origin)
+
+# %%
+
+def calculate_mean_curvature(points, idx, kappa):
+    x0 = points[0][idx]
+    y0 = points[1][idx]
+    # print(x0, y0, kappa)
+    if kappa is not None:
+        H = (kappa + 1/y0) / 2
+        return H
+    else: 
+        return None
+    
+def numerical_kappa(points, idx):
+    """
+    Compute curvature at a point index on a parameterized 2D curve.
+    points: Nx2 array of (x, y)
+    idx: index at which to evaluate curvature
+    Returns: scalar curvature κ
+    """
+    x = points[0]
+    y = points[1]
+    if idx < 2 or idx > len(x) - 3:
+        print("Index out of bounds for curvature calculation.")
+        return None  # avoid edges
+
+ # 1st derivatives (central difference)
+    dx = (-x[idx + 2] + 8*x[idx + 1] - 8*x[idx - 1] + x[idx - 2]) / 12
+    dy = (-y[idx + 2] + 8*y[idx + 1] - 8*y[idx - 1] + y[idx - 2]) / 12
+
+    # 2nd derivatives (central difference)
+    ddx = (-x[idx + 2] + 16*x[idx + 1] - 30*x[idx] + 16*x[idx - 1] - x[idx - 2]) / 12
+    ddy = (-y[idx + 2] + 16*y[idx + 1] - 30*y[idx] + 16*y[idx - 1] - y[idx - 2]) / 12
+
+    numerator = dx * ddy - dy * ddx
+    denominator = (dx**2 + dy**2)**1.5
+
+    if denominator == 0:
+        print("Denominator zero — curvature undefined.")
+        return None
+    kappa = numerator / denominator
+    return kappa
+
+# %%
+plt.figure(figsize=(10, 5))
+import matplotlib.pyplot as plt
+
+indices = np.arange(left_meriodonal.shape[0])
+sc = plt.scatter(left_meriodonal_shifted[0], left_meriodonal_shifted[1], c=indices, cmap='viridis', s=20)
+plt.colorbar(sc, label='Index')
+plt.title('Left Meridional Profile (Index Colored)')
+plt.xlabel('X')
+plt.ylabel('Y')
+plt.gca().invert_yaxis()
+plt.show()
+
+# %%
+H_list = []
+for idx in range(len(left_meriodonal_shifted[0])):
+    left_Kappa = numerical_kappa([left_meriodonal_shifted[0], left_meriodonal_shifted[1]], idx)
+    # plt.scatter(idx, left_Kappa, color='r')
+    H_left = calculate_mean_curvature([left_meriodonal_shifted[0], left_meriodonal_shifted[1]], idx, left_Kappa)
+    plt.scatter(idx, H_left, color='b')
+    if H_left is not None:
+        H_list.append(H_left)
+
+plt.xlabel('Index')
+plt.ylabel('Mean Curvature H (left)')
+plt.title('Mean Curvature H along Left Meridional Profile')
+plt.show()
+
+# %%
+import numpy as np 
+print(1/a)
+print(np.mean(H_list))
+
 # %%
 if not origin:
     print("distance calculation failed.")
@@ -111,6 +244,7 @@ pts_l = ellipse_to_points(*ellipse_left)
 pts_r = ellipse_to_points(*ellipse_right)
 # Xl, Yl = transform_points_to_new_frame(pts_l[:,0], pts_l[:,1], origin)
 # Xr, Yr = transform_points_to_new_frame(pts_r[:,0], pts_r[:,1], origin)
+
 # %%
 
 # Generate debug visualization
@@ -169,6 +303,9 @@ plt.title("Analysis Results - Fitted Ellipses and Contact Points")
 plt.axis("off")
 plt.show()
 
+
+# %%
+
 # Comprehensive printout
 print(f"\n=== Results for {os.path.basename(image_path)} ===")
 # transform contact points for below
@@ -206,6 +343,11 @@ for side, contacts in [("Left", left_contacts), ("Right", right_contacts)]:
 print("\nGeometric Analysis:")
 print(f"Y* (neck width): {Ystar:.2f} px")
 print(f"Image origin: ({origin_full[0]:.1f}, {origin_full[1]:.1f})")
+
+
+
+# %%
+
 
 ###############################################################################################################################
 
@@ -274,5 +416,9 @@ for side in ["left", "right"]:
     print(f"Parameters: a={a:.2f}, b={b:.2f}")
     print(f"ROI coords: x={x_min}-{x_max}, y={y_min}-{y_max}")
     print(f"Origin point: {origin_full}")
-    # %%
+
+# %%
+
+
+
 
