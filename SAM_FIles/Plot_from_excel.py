@@ -4,8 +4,8 @@ import numpy as np
 
 # --- Configuration ---
 excel_path = r"Alannah_Sample_1\Alannah_S1_training.xlsx"
-force_keys = ['left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force']  # Change to any of:
-# force_keys = ['left_top_force_circle', 'right_top_force_circle', 'left_bottom_force_circle', 'right_bottom_force_circle']  # Or any other force keys like
+# force_keys = ['left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force']  # Change to any of:
+force_keys = ['left_top_force_circle', 'right_top_force_circle', 'left_bottom_force_circle', 'right_bottom_force_circle']  # Or any other force keys like
 # 'left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force',
 # 'left_top_force_circle', etc.
 color_by = "frame"  # Could also color by plate separation if desired
