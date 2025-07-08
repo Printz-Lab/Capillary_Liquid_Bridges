@@ -6,8 +6,12 @@ import numpy as np
 excel_path = r"Alannah_Sample_1\Alannah_S1_training.xlsx"
 # force_keys = ['left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force']  # Change to any of:
 force_keys = ['left_top_force_circle', 'right_top_force_circle', 'left_bottom_force_circle', 'right_bottom_force_circle']  # Or any other force keys like
+<<<<<<< Updated upstream
 # 'left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force',
 # 'left_top_force_circle', etc.
+=======
+
+>>>>>>> Stashed changes
 color_by = "frame"  # Could also color by plate separation if desired
 
 # --- Load Data ---
@@ -45,7 +49,7 @@ for i, force_key in enumerate(force_keys):
 
 separation_um = df["plate_separation"] * 1e3  # Convert to microns
 # Mask where frame < 30
-mask_early = df["frame"] < 30
+mask_early = df["frame"] < 16
 
 # Plot early segment
 plt.plot(
