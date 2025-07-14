@@ -1,0 +1,12 @@
+{
+  "image_dir": "D:/Capillary_bridging_data_alannah/Trial 1 (water on glass)/video",
+  "mask_dir": "D:/Capillary_bridging_data_alannah/Trial 1 (water on glass)/video/masks_json",
+  "output_dir": "D:/Capillary_bridging_data_alannah/Trial 1 (water on glass)/output",
+  "lines_file": "C:/Users/raglo/OneDrive - University of Arizona/Documents/GitHub/Capillary_Liquid_Bridges/Alannah_S1_substrates.npz",
+  "label_clf_path": "mask_edge_classifier2.pkl",
+  "side_clf_path": "contour_side_classifier2.pkl",
+  "excel_output": "Alannah_S1_training.xlsx",
+  "debug_image_dir": "Alannah_S1_training_debug_images",
+  "first_frame_spacing": 0.0001,
+  "sigma_surface_tension": 72
+}

@@ -3,7 +3,20 @@ import numpy as np
 import os
 from pathlib import Path
 from tkinter import filedialog, Tk
-import argparse
+import json
+
+#config.py is in a different directory, so we add the super directory to the path
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+def load_json_config(cfg_path):
+    try:
+        with open(cfg_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: unable to read config '{cfg_path}': {e}")
+        return {}
+
 
 def select_image_folder():
     root = Tk()
@@ -71,7 +84,10 @@ def interpolate_lines(frames, pt1_list, pt2_list, num_frames):
 
 if __name__ == "__main__":
     # folder = select_image_folder()
-    folder = argparse
+    cfg = load_json_config("Analysis_Files/config.json")
+    lines_file = Path(cfg["lines_file"])
+    folder = Path(cfg["image_dir"])
+    output_dir = Path(cfg["output_dir"])
     image_paths = load_images_from_folder(folder)
 
     # --- Frame selection configuration ---
@@ -111,7 +127,9 @@ if __name__ == "__main__":
     top_lines = interpolate_lines(frame_indices, top_pts1, top_pts2, len(image_paths))
     bottom_lines = interpolate_lines(frame_indices, bot_pts1, bot_pts2, len(image_paths))
 
-    savefile = "Alannah_S1_substrates.npz"
+    savefile = output_dir / lines_file.name
+    if not savefile.parent.exists():
+        savefile.parent.mkdir(parents=True) 
 
     np.savez(
     savefile,

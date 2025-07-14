@@ -6,12 +6,19 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 import sys
 from pathlib import Path
+import json
 
 # Add parent directory to the module search path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from config import lines_file, image_dir
-
+def load_json_config(cfg_path):
+    try:
+        with open(cfg_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: unable to read config '{cfg_path}': {e}")
+        return {}
+    
 def select_image_folder():
     root = Tk()
     root.withdraw()
@@ -82,6 +89,9 @@ def view_images_with_slider(drawn_images):
 
 # --- Main ---
 if __name__ == "__main__":
+    cfg = load_json_config("Analysis_Files/config.json")
+    lines_file = Path(cfg["lines_file"])
+    image_dir = Path(cfg["image_dir"])
     folder = image_dir
     npz_path = lines_file
 
