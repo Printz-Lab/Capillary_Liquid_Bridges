@@ -11,11 +11,20 @@ import matplotlib
 matplotlib.use("TkAgg")  # allows keypress interaction
 
 # === CONFIG ===
-image_dir = Path(r"C:\Users\raglo\OneDrive - University of Arizona\Printz Lab\Data\Capillary_Bridges\My_better_CLB_videos\5-9\s1_tifs")  # Folder with .tif files
-mask_dir = Path(r"C:\Users\raglo\OneDrive - University of Arizona\Printz Lab\Data\Capillary_Bridges\masks_json_2b")  # Folder with .json files
+cfg = json.load(open(r"Analysis_Files\config.json"))
+image_dir = Path(cfg["image_dir"])
+mask_dir  = Path(cfg["mask_dir"])
+output_dir = Path(cfg["output_dir"])
+lines_file = Path(cfg["lines_file"])
+label_clf = Path(cfg["label_clf_path"])
+side_clf  = Path(cfg["side_clf_path"])
+excel_out = Path(cfg["output_dir"]) / cfg["excel_output"]
+debug_dir = Path(cfg["output_dir"]) / cfg["debug_image_dir"]
+first_frame_spacing = cfg["first_frame_spacing"]
+sigma_surface_tension = cfg["sigma_surface_tension"]
 
-csv_path = "labeled_training_data_combined.csv"  # or "labeled_training_data_revised.csv"
-classifier_path = "mask_edge_classifier.pkl"  # or "contour_side_classifier.pkl"
+csv_path = Path(cfg["output_dir"]) / "labeled_training_data_combined.csv"  # or "labeled_training_data_revised.csv"
+classifier_path = label_clf
 
 MAX_DIM = 1024  # image resize if large
 

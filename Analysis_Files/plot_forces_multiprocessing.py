@@ -2,9 +2,18 @@ from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
-from config import (
-    excel_output, debug_image_dir
-)
+import json
+cfg = json.load(open(r"Analysis_Files\config.json"))
+image_dir = Path(cfg["image_dir"])
+mask_dir  = Path(cfg["mask_dir"])
+output_dir = Path(cfg["output_dir"])
+lines_file = Path(cfg["lines_file"])
+label_clf_path = Path(cfg["label_clf_path"])
+side_clf_path = Path(cfg["side_clf_path"])
+excel_out = Path(cfg["output_dir"]) / cfg["excel_output"]
+debug_image_dir = Path(cfg["debug_image_dir"])
+first_frame_spacing = cfg["first_frame_spacing"]
+sigma_surface_tension = cfg["sigma_surface_tension"]
 
 if __name__ == "__main__":
     debug_dir = Path(debug_image_dir)
@@ -22,7 +31,7 @@ if __name__ == "__main__":
     )
 
     image_paths = sorted(image_dir.glob("*.tif")) + sorted(image_dir.glob("*.png"))
-    
+    print(f"Found {len(image_paths)} images in {image_dir}")
 
     args_list = [
     (idx, image_path, mask_dir, bottom_lines, top_lines, pixel_to_meter, debug_dir)
@@ -96,14 +105,14 @@ if __name__ == "__main__":
         })
 
     
-    with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
+    with pd.ExcelWriter(excel_out, engine="openpyxl") as writer:
         pd.DataFrame(forces_data).to_excel(writer, sheet_name="Forces", index=False)
         pd.DataFrame(angles_data).to_excel(writer, sheet_name="Angles", index=False)
         pd.DataFrame(positions_data).to_excel(writer, sheet_name="Contact_Positions", index=False)
         pd.DataFrame(curvature_data).to_excel(writer, sheet_name="Curvature_Y", index=False)
         pd.DataFrame(plate_separation_data).to_excel(writer, sheet_name="Plate_Separation", index=False)
 
-    print(f"\n✅ Results saved to: {excel_output}")
+    print(f"\n✅ Results saved to: {excel_out}")
 
 
     # Filter valid results

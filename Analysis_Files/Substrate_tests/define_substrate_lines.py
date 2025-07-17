@@ -7,6 +7,7 @@ import json
 
 #config.py is in a different directory, so we add the super directory to the path
 import sys
+from matplotlib.widgets import Slider, Button
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 def load_json_config(cfg_path):
@@ -92,7 +93,65 @@ if __name__ == "__main__":
 
     # --- Frame selection configuration ---
     step = 10  # Select every 10th frame
-    custom_frames = [0, 9,17,25 , 33]  # Add any specific frames (like max separation point)
+    # --- Interactive custom frame selection ---
+    import matplotlib.pyplot as plt
+
+    custom_frames = []
+
+    class FrameSelector:
+        def __init__(self, image_paths):
+            self.image_paths = image_paths
+            self.idx = 0
+            self.selected = set()
+
+            self.fig, self.ax = plt.subplots()
+            plt.subplots_adjust(bottom=0.25)
+            self.img = plt.imshow(cv2.cvtColor(cv2.imread(self.image_paths[self.idx]), cv2.COLOR_BGR2RGB))
+            self.title = self.ax.set_title(f"Frame {self.idx}")
+
+            ax_slider = plt.axes([0.2, 0.1, 0.65, 0.03])
+            self.slider = Slider(ax_slider, 'Frame', 0, len(self.image_paths) - 1, valinit=0, valstep=1)
+
+            ax_button = plt.axes([0.8, 0.025, 0.1, 0.04])
+            self.button = Button(ax_button, 'Select/Unselect')
+
+            ax_done = plt.axes([0.6, 0.025, 0.15, 0.04])
+            self.done_button = Button(ax_done, 'Done')
+
+            self.slider.on_changed(self.update)
+            self.button.on_clicked(self.toggle_select)
+            self.done_button.on_clicked(self.finish)
+
+            self.finished = False
+
+        def update(self, val):
+            self.idx = int(self.slider.val)
+            img = cv2.cvtColor(cv2.imread(self.image_paths[self.idx]), cv2.COLOR_BGR2RGB)
+            self.img.set_data(img)
+            sel = "SELECTED" if self.idx in self.selected else ""
+            self.title.set_text(f"Frame {self.idx} {sel}")
+            self.fig.canvas.draw_idle()
+
+        def toggle_select(self, event):
+            if self.idx in self.selected:
+                self.selected.remove(self.idx)
+            else:
+                self.selected.add(self.idx)
+            self.update(self.idx)
+
+        def finish(self, event):
+            self.finished = True
+            plt.close(self.fig)
+
+        def run(self):
+            while not self.finished:
+                plt.pause(0.1)
+            return sorted(self.selected)
+
+    selector = FrameSelector(image_paths)
+    print("Use the slider to browse frames. Click 'Select/Unselect' to mark important frames. Click 'Done' when finished.")
+    custom_frames = selector.run()
+    print(f"Custom selected frames: {custom_frames}")
 
     # Combine and sort unique frame indices
     selected_indices = sorted(set(list(range(0, len(image_paths), step)) + custom_frames))
@@ -136,5 +195,8 @@ if __name__ == "__main__":
     top_lines=np.array(top_lines, dtype=object),
     bottom_lines=np.array(bottom_lines, dtype=object)
 )
-
+    # Update lines_file in config.json to new path
+    cfg["lines_file"] = str(savefile)
+    with open("Analysis_Files/config.json", "w") as f:
+        json.dump(cfg, f, indent=4)
     print(f"Saved top_lines and bottom_lines to {savefile}")

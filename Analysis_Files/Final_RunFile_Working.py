@@ -28,7 +28,20 @@ from cv2ellipse import (
     compute_curve_distance,
     fit_circle_to_contour_near_y,
 )
-from config import image_dir, mask_dir, lines_file, first_frame_spacing, label_clf_path, side_clf_path
+import json 
+
+cfg = json.load(open(r"Analysis_Files\config.json"))
+image_dir = Path(cfg["image_dir"])
+mask_dir  = Path(cfg["mask_dir"])
+output_dir = Path(cfg["output_dir"])
+lines_file = Path(cfg["lines_file"])
+label_clf_path = Path(cfg["label_clf_path"])
+side_clf_path = Path(cfg["side_clf_path"])
+excel_out = Path(cfg["output_dir"]) / cfg["excel_output"]
+debug_dir = Path(cfg["output_dir"]) / cfg["debug_image_dir"]
+first_frame_spacing = cfg["first_frame_spacing"]
+sigma_surface_tension = cfg["sigma_surface_tension"]
+
 
 
 
@@ -408,6 +421,7 @@ def process_single_frame(args):
     idx, image_path, mask_dir, bottom_lines, top_lines, pixel_to_meter, debug_dir = args
     json_path = mask_dir / f"{image_path.stem}_masks.json"
     if not json_path.exists():
+        print(f"Mask file {json_path} does not exist for frame {idx}. Skipping.")
         return None
 
     try:
@@ -442,6 +456,7 @@ def process_single_frame(args):
                 result=result,
                 origin=result.get("origin", None),
             )
+            print(f"Debug image saved to {debug_out}")
 
         return result
 

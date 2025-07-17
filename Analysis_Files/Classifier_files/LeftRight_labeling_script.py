@@ -10,10 +10,19 @@ import matplotlib
 matplotlib.use("TkAgg")  # Enables interactive window for key press detection
 
 # CONFIGURATION
-image_dir =r"D:\Capillary_bridging_data_alannah\Trial 1 (water on glass)\video"  # Folder with .tif files
-mask_dir = r"D:\Capillary_bridging_data_alannah\Trial 1 (water on glass)\video\masks_json"  # Folder with .json files
-input_csv = "labeled_training_data_3.csv"
-output_csv = "labeled_training_data_revised_3.csv"
+cfg = json.load(open(r"C:\Users\Aj\Documents\GitHub\Capillary_Liquid_Bridges\Analysis_Files\config.json"))
+image_dir = Path(cfg["image_dir"])
+mask_dir  = Path(cfg["mask_dir"])
+output_dir = Path(cfg["output_dir"])
+lines_file = Path(cfg["lines_file"])
+label_clf = Path(cfg["label_clf_path"])
+side_clf  = Path(cfg["side_clf_path"])
+excel_out = Path(cfg["output_dir"]) / cfg["excel_output"]
+debug_dir = Path(cfg["output_dir"]) / cfg["debug_image_dir"]
+first_frame_spacing = cfg["first_frame_spacing"]
+sigma_surface_tension = cfg["sigma_surface_tension"]
+input_csv = Path(cfg["output_dir"]) / "labeled_training_data.csv"
+output_csv = Path(cfg["output_dir"]) / "labeled_training_data_LR.csv"
 
 # === Helper Functions ===
 def extract_features(mask, image_shape):

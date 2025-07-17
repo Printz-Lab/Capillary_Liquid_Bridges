@@ -1,74 +1,94 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import json
+from pathlib import Path
+from matplotlib import cm
 
 # --- Configuration ---
-excel_path = r"Alannah_Sample_1\Alannah_S1_training.xlsx"
-# force_keys = ['left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force']  # Change to any of:
-force_keys = ['left_top_force_circle', 'right_top_force_circle', 'left_bottom_force_circle', 'right_bottom_force_circle']  # Or any other force keys like
-# 'left_top_force', 'right_top_force', 'left_bottom_force', 'right_bottom_force',
-# 'left_top_force_circle', etc.
-color_by = "frame"  # Could also color by plate separation if desired
+cfg = json.load(open(r"Analysis_Files\config.json"))
+excel_path = Path(cfg["output_dir"]) / cfg["excel_output"]
+force_keys = [
+    'left_top_force_circle',
+    'right_top_force_circle',
+    'left_bottom_force_circle',
+    'right_bottom_force_circle'
+]
 
 # --- Load Data ---
 df_sep = pd.read_excel(excel_path, sheet_name="Plate_Separation")
 df_forces = pd.read_excel(excel_path, sheet_name="Forces")
 
-# Merge on 'frame'
+# Merge and clean
 df = pd.merge(df_forces, df_sep[["frame", "plate_separation"]], on="frame")
+df = df[df["frame"] >= 5].reset_index(drop=True)
+df[force_keys] = df[force_keys].apply(pd.to_numeric, errors="coerce")
+df["average_force"] = df[force_keys].mean(axis=1)
+df["plate_separation_um"] = df["plate_separation"] * 1e3
 
-average_forces = df[force_keys].mean(axis=1)
+# --- Compute Segments ---
+sep = df["plate_separation"].values
+direction = np.sign(np.diff(sep))
+direction = np.insert(direction, 0, direction[0] if len(direction) > 0 else 0)
+for i in range(1, len(direction)):
+    if direction[i] == 0:
+        direction[i] = direction[i-1]
 
+segment_id = np.zeros_like(direction, dtype=int)
+seg = 0
+for i in range(1, len(direction)):
+    if direction[i] != direction[i - 1]:
+        seg += 1
+    segment_id[i] = seg
+
+df["segment_id"] = segment_id
+df["direction"] = direction
+n_segments = segment_id.max() + 1
+cmap = cm.get_cmap('tab10', n_segments +1)
 
 # --- Plot ---
-plt.figure(figsize=(10, 6))
-for i, force_key in enumerate(force_keys):
-    print(df.columns)
-    if force_key not in df.columns:
-        print(f"Warning: {force_key} not found in DataFrame columns.")
-        continue
+plt.figure(figsize=(12, 7))
+markers = ['o', 's', '^', 'D']
 
-    # Ensure the force column is numeric
-    df[force_key] = pd.to_numeric(df[force_key], errors='coerce')
-    # Drop NaNs
-    df2 = df[["frame", force_key, "plate_separation"]].dropna()
-    
-    # Convert to microns for plotting
-    separation_um = df2["plate_separation"] * 1e3
-    forces = df2[force_key]
-    frames = df2["frame"]
-    markers = ['o', 's', '^', 'D']  # Different markers for each force type
-    # Assign color based on frame value
-    color = np.where(df2["frame"] < 30, 'tab:blue', 'tab:orange')
-    sc =plt.scatter(separation_um, forces, c=color, s=30, edgecolor='k', marker=markers[i], label=force_key)
+shown_labels = set()  # put this before the segment loop
+
+for seg_id in range(n_segments):
+    seg_mask = df["segment_id"] == seg_id
+    direction_label = "Expansion" if df.loc[seg_mask, "direction"].iloc[0] > 0 else "Contraction"
+    color = cmap(seg_id)
+
+    # Plot individual forces (scatter)
+    for i, key in enumerate(force_keys):
+        label = key if key not in shown_labels else None
+        plt.scatter(
+            df.loc[seg_mask, "plate_separation_um"],
+            df.loc[seg_mask, key],
+            s=30,
+            edgecolor='k',
+            marker=markers[i],
+            label=label,
+            color=color,
+        )
+        shown_labels.add(key)
 
 
-separation_um = df["plate_separation"] * 1e3  # Convert to microns
-# Mask where frame < 30
-mask_early = df["frame"] < 30
+    # Plot average force
+    plt.plot(
+        df.loc[seg_mask, "plate_separation_um"],
+        df.loc[seg_mask, "average_force"],
+        label=f"Avg Force (Seg {seg_id+1}, {direction_label})",
+        color=color,
+        marker='x',
+        linestyle='-'
+    )
 
-# Plot early segment
-plt.plot(
-    separation_um[mask_early],
-    average_forces[mask_early],
-    color='tab:blue',
-    label='Average Force Expansion',
-    marker='x'
-)
-
-# Plot late segment
-plt.plot(
-    separation_um[~mask_early],
-    average_forces[~mask_early],
-    color='tab:orange',
-    label='Average Force Compression',
-    marker='x'
-)
-
-plt.legend()
-plt.xlabel("Plate Separation (mm)")
+plt.xlabel("Plate Separation (μm)")
 plt.ylabel("Force (μN)")
-plt.title(f"{force_key} vs. Plate Separation")
+plt.title("Capillary Bridge Forces vs Plate Separation")
+plt.legend()
 plt.grid(True)
 plt.tight_layout()
+save_path = Path(cfg["output_dir"]) / "capillary_bridge_forces_vs_plate_separation.png"
+plt.savefig(save_path)
+print(f"Plot saved to: {save_path}")
 plt.show()

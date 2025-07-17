@@ -4,15 +4,25 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-import pandas as pd00q
+import pandas as pd
 import matplotlib
 
 matplotlib.use("TkAgg")  # Enables interactive window for key press detection
+cfg = json.load(open(r"C:\Users\Aj\Documents\GitHub\Capillary_Liquid_Bridges\Analysis_Files\config.json"))
+image_dir = Path(cfg["image_dir"])
+mask_dir  = Path(cfg["mask_dir"])
+output_dir = Path(cfg["output_dir"])
+lines_file = Path(cfg["lines_file"])
+label_clf = Path(cfg["label_clf_path"])
+side_clf  = Path(cfg["side_clf_path"])
+excel_out = Path(cfg["output_dir"]) / cfg["excel_output"]
+debug_dir = Path(cfg["output_dir"]) / cfg["debug_image_dir"]
+first_frame_spacing = cfg["first_frame_spacing"]
+sigma_surface_tension = cfg["sigma_surface_tension"]
 
 # CONFIGURATION
-image_dir = r"D:\Capillary_bridging_data_alannah\Trial 1 (water on glass)\video"  # Folder with .tif files
-mask_dir = r"D:\Capillary_bridging_data_alannah\Trial 1 (water on glass)\video\masks_json"  # Folder with .json files
-output_csv = "labeled_training_data_scratch.csv"
+output_csv = Path(cfg["output_dir"]) / "labeled_training_data.csv"
+
 AREA_THRESHOLD = 1000  # Masks with area smaller than this will be auto-labeled 0 and skipped from GUI
 
 # Create output if not exists
@@ -86,6 +96,7 @@ for image_path in image_paths:
         image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
     with open(json_path, "r") as f:
+        print(f"Processing {image_path.name} with {json_path.name}")
         masks = json.load(f)
 
     for idx, mask in enumerate(masks):

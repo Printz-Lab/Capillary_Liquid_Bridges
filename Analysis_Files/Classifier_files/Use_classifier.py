@@ -9,15 +9,22 @@ from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from tqdm import tqdm
 
-
+cfg = json.load(open(r"Analysis_Files\config.json"))
+image_dir = Path(cfg["image_dir"])
+mask_dir  = Path(cfg["mask_dir"])
+output_dir = Path(cfg["output_dir"])
+lines_file = Path(cfg["lines_file"])
+label_clf_path = Path(cfg["label_clf_path"])
+side_clf_path = Path(cfg["side_clf_path"])
+excel_out = Path(cfg["output_dir"]) / cfg["excel_output"]
+debug_dir = Path(cfg["output_dir"]) / cfg["debug_image_dir"]
+first_frame_spacing = cfg["first_frame_spacing"]
+sigma_surface_tension = cfg["sigma_surface_tension"]
 # Load trained classifiers
-label_clf = joblib.load("mask_edge_classifier2.pkl")
-side_clf = joblib.load("contour_side_classifier2.pkl")
+label_clf = joblib.load(label_clf_path)
+side_clf = joblib.load(side_clf_path)
 
-# Paths
-image_dir = r"D:\Capillary_bridging_data_alannah\Trial 1 (water on glass)\video"
-mask_dir = r"D:\Capillary_bridging_data_alannah\Trial 1 (water on glass)\video\masks_json"
-output_dir = "predicted_mask_overlays"
+
 os.makedirs(output_dir, exist_ok=True)
 
 # Features to extract (same as in training)
@@ -44,6 +51,7 @@ if __name__ == "__main__":
     image_paths = sorted(
     list(Path(image_dir).glob("*.tif")) + list(Path(image_dir).glob("*.png"))
 )
+    print(f"Found {len(image_paths)} images to process.")
     for idx, image_path in enumerate(tqdm(image_paths)):
         json_path = Path(mask_dir) / f"{image_path.stem}_masks.json"
         if not json_path.exists():
@@ -72,10 +80,14 @@ if __name__ == "__main__":
             continue
 
         X_pred = pd.DataFrame(features, columns=["area", "perimeter", "aspect_ratio", "extent", "solidity", "centroid_x", "centroid_y"])
+        print(f"Extracted features for {len(features)} masks in {image_path.name}")
         labels = label_clf.predict(X_pred)
 
+        print(labels)
         edge_indices = [i for i, label in zip(valid_indices, labels) if label == 1]
         edge_features = X_pred.iloc[[valid_indices.index(i) for i in edge_indices]]
+
+        print(f"Identified {len(edge_indices)} edge masks in {image_path.name}")
         side_preds = side_clf.predict(edge_features)
 
         # Overlay predictions

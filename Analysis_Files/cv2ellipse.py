@@ -565,7 +565,7 @@ def draw_contact_angle_debug(
     # Annotate angle
     text_pos = (x0 + 5, y0 - 10)
     cv2.putText(
-        img, f"{label}{angle:.1f}°", text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1
+        img, f"{label}{angle:.1f} deg", text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1
     )
 
     return img
