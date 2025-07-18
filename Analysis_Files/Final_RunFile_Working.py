@@ -124,10 +124,10 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         cropped = contour[mask]
         return cropped.reshape(-1, 1, 2) if len(cropped) > 0 else None
 
-    x_min_left = max(int(bottom_line[0][0]), int(top_line[0][0]))
-    x_max_left = 5000
-    x_min_right = 0
-    x_max_right = min(int(bottom_line[1][0]), int(top_line[1][0]))
+    x_min_left = min(int(bottom_line[0][0]), int(top_line[0][0]))-4
+    x_max_left = np.mean([int(bottom_line[0][0]), int(bottom_line[1][0])])
+    x_min_right = np.mean([int(bottom_line[0][0]), int(bottom_line[1][0])])
+    x_max_right = max(int(bottom_line[1][0]), int(top_line[1][0]))+4
 
     contour_left = (
         get_contour(left_mask, x_min=x_min_left, x_max=x_max_left)

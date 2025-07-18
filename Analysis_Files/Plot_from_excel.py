@@ -5,6 +5,46 @@ import json
 from pathlib import Path
 from matplotlib import cm
 
+import matplotlib as mpl
+
+mpl.rcParams.update(
+    {
+        # 1) pick Arial for all sans-serif text…
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial"],
+        # 2) make mathtext use Arial as well
+        "mathtext.fontset": "custom",
+        "mathtext.rm": "Arial",
+        "mathtext.it": "Arial:italic",
+        "mathtext.bf": "Arial:bold",
+        "mathtext.default": "rm",
+        # 3) still your other style settings
+        "font.size": 14,
+        "axes.labelsize": 18,
+        "axes.titlesize": 18,
+        "xtick.labelsize": 20,
+        "ytick.labelsize": 20,
+        "legend.fontsize": 14,
+        "figure.figsize": (6, 8),
+        "axes.linewidth": 1.5,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 6,
+        "ytick.major.size": 6,
+        "xtick.minor.size": 3,
+        "ytick.minor.size": 3,
+        "xtick.major.width": 1.2,
+        "ytick.major.width": 1.2,
+        "xtick.minor.width": 1.0,
+        "ytick.minor.width": 1.0,
+        "axes.grid": False,
+        "savefig.dpi": 300,
+        # if you had usetex on, turn it off so mathtext takes over:
+        "text.usetex": False,
+    }
+)
+
+
 # --- Configuration ---
 cfg = json.load(open(r"Analysis_Files\config.json"))
 excel_path = Path(cfg["output_dir"]) / cfg["excel_output"]
@@ -13,6 +53,12 @@ force_keys = [
     'right_top_force_circle',
     'left_bottom_force_circle',
     'right_bottom_force_circle'
+]
+labels = [
+    'Left Top',
+    'Right Top',
+    'Left Bottom',
+    'Right Bottom'
 ]
 
 # --- Load Data ---
@@ -59,7 +105,7 @@ for seg_id in range(n_segments):
 
     # Plot individual forces (scatter)
     for i, key in enumerate(force_keys):
-        label = key if key not in shown_labels else None
+        label = labels[i] if key not in shown_labels else None
         plt.scatter(
             df.loc[seg_mask, "plate_separation_um"],
             df.loc[seg_mask, key],
@@ -78,13 +124,12 @@ for seg_id in range(n_segments):
         df.loc[seg_mask, "average_force"],
         label=f"Avg Force (Seg {seg_id+1}, {direction_label})",
         color=color,
-        marker='x',
         linestyle='-'
     )
 
 plt.xlabel("Plate Separation (μm)")
 plt.ylabel("Force (μN)")
-plt.title("Capillary Bridge Forces vs Plate Separation")
+# plt.title("Capillary Bridge Forces vs Plate Separation")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()

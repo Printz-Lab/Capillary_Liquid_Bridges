@@ -2,10 +2,23 @@ import numpy as np
 from pathlib import Path
 from tkinter import filedialog, Tk
 import sys 
+import json 
 
+def load_json_config(cfg_path):
+    try:
+        with open(cfg_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: unable to read config '{cfg_path}': {e}")
+        return {}
 # Add parent directory to the module search path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from config import lines_file, image_dir
+cfg = load_json_config("Analysis_Files/config.json")
+lines_file = Path(cfg["lines_file"])
+folder = Path(cfg["image_dir"])
+output_dir = Path(cfg["output_dir"])
+
 
 def shift_line_y(line, dy):
     """Shift a substrate line in y-direction by dy pixels"""
@@ -43,5 +56,9 @@ if __name__ == "__main__":
         top_lines=np.array(new_top, dtype=object),
         bottom_lines=np.array(new_bottom, dtype=object)
     )
+    cfg["lines_file"] = str(save_path)
+    with open("Analysis_Files/config.json", "w") as f:
+        json.dump(cfg, f, indent=4)
+    print(f"Saved top_lines and bottom_lines to {save_path}")
 
     print(f"✅ Shifted lines saved to: {save_path}")

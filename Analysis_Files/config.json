@@ -1,12 +1,12 @@
 {
-    "image_dir": "K:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminoSilane_dynamic",
-    "mask_dir": "K:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminoSilane_dynamic\\masks_json",
-    "output_dir": "K:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminoSilane_dynamic\\output",
-    "lines_file": "K:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminoSilane_dynamic\\output\\Alannah_S1_substrates.npz",
+    "image_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromosilane_dynamic_glasstwo",
+    "mask_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromosilane_dynamic_glasstwo\\masks_json",
+    "output_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromosilane_dynamic_glasstwo\\output",
+    "lines_file": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromosilane_dynamic_glasstwo\\output\\Alannah_S1_substrates.npz",
     "label_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\mask_edge_classifier3.pkl",
     "side_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\contour_side_classifier3.pkl",
     "excel_output": "Alannah_S1_training.xlsx",
-    "debug_image_dir": "K:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminoSilane_dynamic\\output\\debug_images",
-    "first_frame_spacing": 0.00005,
+    "debug_image_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromosilane_dynamic_glasstwo\\output\\debug_images",
+    "first_frame_spacing": 5e-05,
     "sigma_surface_tension": 72
 }
