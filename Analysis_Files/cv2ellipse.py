@@ -254,55 +254,107 @@ def ellipse_to_points(center, axes, angle_deg, num_points=360):
 def contact_angle_at_index(points, index, side="left", label="top"):
     if index <= 0 or index >= len(points) - 1:
         return None
-    p1 = points[index - 1]
-    p2 = points[index + 1]
-    dx = p2[0] - p1[0]
-    dy = p2[1] - p1[1]
+    # Average angle over a window of points around the index
+    window = 3  # Use 3 points before and after
+    start = max(0, index - window)
+    end = min(len(points) - 1, index + window)
+    dxs = []
+    dys = []
+    for i in range(start, end):
+        p1 = points[i]
+        p2 = points[i + 1]
+        dxs.append(p2[0] - p1[0])
+        dys.append(p2[1] - p1[1])
+    dx = np.mean(dxs)
+    dy = np.mean(dys)
     angle_rad = np.arctan2(np.abs(dy), np.abs(dx))
     angle_deg = np.rad2deg(angle_rad)
-    # print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
     # Flip convention for left side
     if side == "left" and label == "top" or side == "right" and label == "bottom":
         angle_deg = -angle_deg
+    print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
     return angle_deg
 
 
-def find_contact_point_on_line_half(points, line_y, side="right", tolerance=10):
-    # Get center x to split
-    center_x = np.mean(points[:, 0])
+def find_contact_point_on_line_half(points, line_y, top_line, bottom_line, label, side="right", tolerance=20):
+    center_x = (top_line[0][0] + top_line[1][0]) / 2
+    plt.plot(points[:, 0], points[:, 1], 'o', markersize=2, label='Ellipse Points')
+    # plt.axvline(x=top_line[0][0], color='b', linestyle='--', label='Top Line X left')
+    # plt.axvline(x=bottom_line[0][0], color='y', linestyle='--', label='Bottom Line X left')
+    plt.scatter(top_line[0][0], top_line[0][1], color='r', label='Top Line Y right')
+    plt.scatter(bottom_line[0][0], bottom_line[0][1], color='g', label='Bottom Line Y right')
+    plt.scatter(top_line[1][0], top_line[1][1], color='b', label='Top Line Y left')
+    plt.scatter(bottom_line[1][0], bottom_line[1][1], color='y', label='Bottom Line Y left')
+    plt.title(f"Contact Point Search on {label} Line ({side} side)")
+    plt.legend()
+    plt.show()
     if side == "right":
+        if label == "top":
+            center_x = top_line[0][0]
+            print(f"Right side, top line center x: {center_x}")
+        else:
+            center_x = bottom_line[0][0]
+            print(f"Right side, bottom line center x: {center_x}")
         relevant_points = points[points[:, 0] > center_x]
     else:
+        if label == "top":
+            center_x = top_line[1][0]
+            print(f"Left side, top line center x: {center_x}")
+        else:
+            center_x = bottom_line[1][0]
+            print(f"Left side, bottom line center x: {center_x}")
         relevant_points = points[points[:, 0] < center_x]
 
     dists = np.abs(relevant_points[:, 1] - line_y)
     close_indices = np.where(dists < tolerance)[0]
     if len(close_indices) == 0:
+        print(f"No contact point found on {label} line for {side} side within tolerance.")
         return None
     best_idx = close_indices[np.argmin(dists[close_indices])]
-    return best_idx, relevant_points[best_idx]
+    return best_idx, relevant_points[best_idx], relevant_points
 
+def extract_all_contact_angles(ellipse_left, ellipse_right, roi_y_top, roi_y_bottom, top_line, bottom_line):
+    if ellipse_left is None or ellipse_right is None:
+        return {}, {}
 
-def extract_all_contact_angles(ellipse, roi_y_top, roi_y_bottom, side="left"):
-    if ellipse is None:
-        return {}
+    points_left = ellipse_to_points(ellipse_left[0], ellipse_left[1], ellipse_left[2])
+    points_right = ellipse_to_points(ellipse_right[0], ellipse_right[1], ellipse_right[2])
+    plt.plot(points_left[:, 0], points_left[:, 1], 'o', markersize=2, label='Left Ellipse Points')
+    plt.plot(points_right[:, 0], points_right[:, 1], 'o', markersize=2, label='Right Ellipse Points')
+    plt.axhline(y=roi_y_top, color='r', linestyle='--', label='ROI Top Line')
+    plt.axhline(y=roi_y_bottom, color='g', linestyle='--', label='ROI Bottom Line')
+    plt.legend()
+    plt.show()
 
-    center, axes, angle = ellipse
-    points = ellipse_to_points(center, axes, angle)
+    left_result = {}
+    right_result = {}
 
-    result = {}
+    if ellipse_left is not None:
+        center, axes, angle = ellipse_left
+        points = ellipse_to_points(center, axes, angle)
 
-    for label, line_y in [("top", roi_y_top), ("bottom", roi_y_bottom)]:
-        side_selector = "right" if side == "left" else "left"  # inward-facing side
-        res = find_contact_point_on_line_half(points, line_y, side_selector)
-        if res is not None:
-            idx, pt = res
-            ang = contact_angle_at_index(points, idx, side, label)
-            result[label] = {"point": pt, "angle_deg": ang}
-        else:
-            result[label] = {"point": None, "angle_deg": None}
+        for label, line_y in [("top", roi_y_top), ("bottom", roi_y_bottom)]:
+            res = find_contact_point_on_line_half(points, line_y, top_line, bottom_line, label, side="left")
+            if res is not None:
+                idx, pt, relevant_points = res
+                ang = contact_angle_at_index(relevant_points, idx, "left", label)
+                left_result[label] = {"point": pt, "angle_deg": ang}
+            else:
+                left_result[label] = {"point": None, "angle_deg": None}
 
-    return result
+    if ellipse_right is not None:
+        center, axes, angle = ellipse_right
+        points = ellipse_to_points(center, axes, angle)
+        for label, line_y in [("top", roi_y_top), ("bottom", roi_y_bottom)]:
+            res = find_contact_point_on_line_half(points, line_y, top_line, bottom_line, label, side="right")
+            if res is not None:
+                idx, pt, relevant_points = res
+                ang = contact_angle_at_index(relevant_points, idx, "right", label)
+                right_result[label] = {"point": pt, "angle_deg": ang}
+            else:
+                right_result[label] = {"point": None, "angle_deg": None}
+
+    return left_result, right_result
 
 def get_meridonal_profile_new(points, contacts, side):
     """

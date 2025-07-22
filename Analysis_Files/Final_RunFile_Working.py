@@ -124,10 +124,36 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         cropped = contour[mask]
         return cropped.reshape(-1, 1, 2) if len(cropped) > 0 else None
 
-    x_min_left = min(int(bottom_line[0][0]), int(top_line[0][0]))-4
+    x_min_left = min(int(bottom_line[0][0]), int(top_line[0][0]))-2
     x_max_left = np.mean([int(bottom_line[0][0]), int(bottom_line[1][0])])
     x_min_right = np.mean([int(bottom_line[0][0]), int(bottom_line[1][0])])
-    x_max_right = max(int(bottom_line[1][0]), int(top_line[1][0]))+4
+    x_max_right = max(int(bottom_line[1][0]), int(top_line[1][0]))+8
+
+    contour_left = (
+        get_contour(left_mask, x_min=x_min_left, x_max=x_max_left)
+        if left_mask
+        else None
+    )
+    contour_right = (
+        get_contour(right_mask, x_min=x_min_right, x_max=x_max_right)
+        if right_mask
+        else None
+    )
+
+    ellipse_left = (
+        fit_ellipse_to_contour(contour_left) if contour_left is not None else None
+    )
+    ellipse_right = (
+        fit_ellipse_to_contour(contour_right) if contour_right is not None else None
+    )
+
+    origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
+
+    width = (top_line[1][0] - top_line[0][0]) / 2 +20
+    x_min_left = origin[0] - width
+    x_max_left = origin[0]
+    x_min_right = origin[0]
+    x_max_right = origin[0] + width
 
     contour_left = (
         get_contour(left_mask, x_min=x_min_left, x_max=x_max_left)
@@ -158,8 +184,8 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
     separation_m = separation_px * pixel_to_meter
     results["plate_separation_m"] = separation_m
 
-    left_contacts = extract_all_contact_angles(ellipse_left, y_top, y_bot, "left")
-    right_contacts = extract_all_contact_angles(ellipse_right, y_top, y_bot, "right")
+    left_contacts, right_contacts = extract_all_contact_angles(ellipse_left, ellipse_right, y_top, y_bot, top_line, bottom_line)
+    # right_contacts = extract_all_contact_angles(ellipse_right, y_top, y_bot, top_line, bottom_line, "right")
 
     origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
 
@@ -211,6 +237,29 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
             label=f'Meridonal Contour {side}',
             linestyle='--',
         )
+        # Interpolate between top_line and bottom_line points
+        num_interp = 100
+        x_interp_top = np.linspace(top_line[1][0], top_line[0][0], num_interp)
+        y_interp_top = np.linspace(top_line[1][1], top_line[0][1], num_interp)
+        interp_points_top = np.stack([x_interp_top, y_interp_top], axis=-1)
+
+        x_interp_bottom = np.linspace(bottom_line[1][0], bottom_line[0][0], num_interp)
+        y_interp_bottom = np.linspace(bottom_line[1][1], bottom_line[0][1], num_interp)
+        interp_points_bottom = np.stack([x_interp_bottom, y_interp_bottom], axis=-1)
+
+        # Only plot points near the contour
+        contour_xy = profile_pts_contour
+        distances_top = np.min(np.linalg.norm(contour_xy[None, :, :] - interp_points_top[:, None, :], axis=-1), axis=1)
+        threshold = 15  # pixels, adjust as needed
+        near_mask_top = distances_top < threshold
+        plt.plot(interp_points_top[near_mask_top, 0], interp_points_top[near_mask_top, 1], color='purple')
+
+        distances_bottom = np.min(np.linalg.norm(contour_xy[None, :, :] - interp_points_bottom[:, None, :], axis=-1), axis=1)
+        threshold = 15  # pixels, adjust as needed
+        near_mask_bottom = distances_bottom < threshold
+        plt.plot(interp_points_bottom[near_mask_bottom, 0], interp_points_bottom[near_mask_bottom, 1], color='purple')
+        # plt.plot(top_line[:, 0], top_line[:, 1], label='Top Line', color='blue')
+        # plt.plot(bottom_line[:, 0], bottom_line[:, 1], label='Bottom Line', color='orange')
         plt.title(f'Meridonal Profile for {side} Side')
         plt.xlabel('X')
         plt.ylabel('Y')
@@ -218,23 +267,24 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
 
         def angle_of_substrate(top_line, bottom_line):
             """Calculate angle of substrate line."""
-            dx = bottom_line[1][0] - bottom_line[0][0] 
+            dx = bottom_line[1][0] - bottom_line[0][0] #bottom right X - bottom left X
             dy = bottom_line[1][1] - bottom_line[0][1]
             bottom_angle = np.degrees(np.arctan2(dy, dx))
             dx = top_line[1][0] - top_line[0][0]
             dy = top_line[1][1] - top_line[0][1]
             top_angle = np.degrees(np.arctan2(dy, dx))
-            # print(f"Bottom angle: {bottom_angle}, Top angle: {top_angle}")
+            print(f"Bottom angle: {bottom_angle}, Top angle: {top_angle}")
             return (bottom_angle + top_angle) / 2
         
-        angle_of_substrate = angle_of_substrate(top_line, bottom_line)
+        Subst_Angle = angle_of_substrate(top_line, bottom_line)
         shifted = transform_points_to_new_frame(
-            meridonal[:, 0], meridonal[:, 1], origin, angle_of_substrate
+            meridonal[:, 0], meridonal[:, 1], origin, Subst_Angle
         )
         shifted_contour = transform_points_to_new_frame(
-            meridonal_contour[:, 0], meridonal_contour[:, 1], origin, angle_of_substrate
+            meridonal_contour[:, 0], meridonal_contour[:, 1], origin, Subst_Angle
         )
         R2 = results.get(f"circle_radius_R2_{side}", None)
+        print(f"R2 for {side}: {R2}")
         # plt.figure(figsize=(10, 6))
         # plt.plot(shifted[0], shifted[1], label=f'Meridonal Profile {side}')
         # plt.title(f'Meridonal Profile for {side} Side')
@@ -250,27 +300,30 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
             kappa = numerical_kappa(shifted, idx)
             H = calculate_mean_curvature(shifted, idx, kappa)
             H2 = new_curvature_calculation(shifted, idx)
-            H2_contour = new_curvature_calculation(shifted_contour, idx)
+        #     H2_contour = new_curvature_calculation(shifted_contour, idx)
             if H2 is not None:
                 if side == "left":
                     H2 = -H2
                 H_list.append(H2)
-            if H2_contour is not None:
-                if side == "left":
-                    H2_contour = -H2_contour
-                H_contour_list.append(H2_contour)
+        #     if H2_contour is not None:
+        #         if side == "left":
+        #             H2_contour = -H2_contour
+        #         H_contour_list.append(H2_contour)
 
-        plt.figure(figsize=(10, 6))
-        plt.plot(H_list, label=f'H values for {side} side')
-        plt.plot(H_contour_list, label=f'H contour values for {side} side', linestyle='--')
-        plt.axhline(0, color='gray', linestyle='--', linewidth=0.5)
-        plt.axvline(0, color='gray', linestyle='--', linewidth=0.5) 
-        plt.title(f'Curvature Profile for {side} Side')
-        plt.xlabel('Index')
-        plt.ylabel('Curvature (H)')
-        plt.legend()
-
-        H_mean = np.mean(H_list) if H_list else None
+        # plt.figure(figsize=(10, 6))
+        # plt.plot(H_list, label=f'H values for {side} side')
+        # plt.plot(H_contour_list, label=f'H contour values for {side} side', linestyle='--')
+        # plt.axhline(0, color='gray', linestyle='--', linewidth=0.5)
+        # plt.axvline(0, color='gray', linestyle='--', linewidth=0.5) 
+        # plt.title(f'Curvature Profile for {side} Side')
+        # plt.xlabel('Index')
+        # plt.ylabel('Curvature (H)')
+        # plt.legend()
+        if H_list:
+            H_mean = np.mean(H_list)
+        else:
+            H_mean = None
+            print('H_Mean is None for', side)
         results[f"H_mean_{side}"] = H_mean
         for pos in ["top", "bottom"]:
             contact = contacts[pos]
@@ -467,8 +520,10 @@ def process_single_frame(args):
 
 if __name__ == "__main__":
     # %% Example use on first frame
-    frame_number = 20  # Change this to process a different frame
+    image_paths = sorted(image_dir.glob("*.tif")) or sorted(image_dir.glob("*.png"))
+    frame_number = 5  # Change this to process a different frame
     json_path = mask_dir / f"{image_paths[frame_number].stem}_masks.json"
+    print(json_path)
     with open(json_path, "r") as f:
         masks = json.load(f)
     img = cv2.imread(str(image_paths[frame_number]))
@@ -479,6 +534,7 @@ if __name__ == "__main__":
     frame_result, left_mask, right_mask = process_frame_with_ellipses(
         img, masks, bottom_line, top_line
     )
+    plt.show()
     if frame_result:
         print("Left Top Force (Ellipse Model):", frame_result["left_top_force"])
         print("Right Top Force (Ellipse Model):", frame_result["right_top_force"])
