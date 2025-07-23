@@ -8,6 +8,8 @@ import json
 #config.py is in a different directory, so we add the super directory to the path
 import sys
 from matplotlib.widgets import Slider, Button
+import matplotlib
+matplotlib.use('Qt5Agg')  # Use Qt5 backend for interactive plotting
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 def load_json_config(cfg_path):
@@ -108,6 +110,7 @@ if __name__ == "__main__":
             plt.subplots_adjust(bottom=0.25)
             self.img = plt.imshow(cv2.cvtColor(cv2.imread(self.image_paths[self.idx]), cv2.COLOR_BGR2RGB))
             self.title = self.ax.set_title(f"Frame {self.idx}")
+            self.images = [cv2.cvtColor(cv2.imread(p), cv2.COLOR_BGR2RGB) for p in self.image_paths]
 
             ax_slider = plt.axes([0.2, 0.1, 0.65, 0.03])
             self.slider = Slider(ax_slider, 'Frame', 0, len(self.image_paths) - 1, valinit=0, valstep=1)
@@ -118,6 +121,9 @@ if __name__ == "__main__":
             ax_done = plt.axes([0.6, 0.025, 0.15, 0.04])
             self.done_button = Button(ax_done, 'Done')
 
+            self.fig.canvas.mpl_connect("key_press_event", self.on_key)
+
+
             self.slider.on_changed(self.update)
             self.button.on_clicked(self.toggle_select)
             self.done_button.on_clicked(self.finish)
@@ -126,8 +132,7 @@ if __name__ == "__main__":
 
         def update(self, val):
             self.idx = int(self.slider.val)
-            img = cv2.cvtColor(cv2.imread(self.image_paths[self.idx]), cv2.COLOR_BGR2RGB)
-            self.img.set_data(img)
+            self.img.set_data(self.images[self.idx])    
             sel = "SELECTED" if self.idx in self.selected else ""
             self.title.set_text(f"Frame {self.idx} {sel}")
             self.fig.canvas.draw_idle()
@@ -147,6 +152,14 @@ if __name__ == "__main__":
             while not self.finished:
                 plt.pause(0.1)
             return sorted(self.selected)
+        def on_key(self, event):
+            if event.key == "right":
+                new_idx = min(self.idx + 1, len(self.image_paths) - 1)
+                self.slider.set_val(new_idx)
+            elif event.key == "left":
+                new_idx = max(self.idx - 1, 0)
+                self.slider.set_val(new_idx)
+
 
     selector = FrameSelector(image_paths)
     print("Use the slider to browse frames. Click 'Select/Unselect' to mark important frames. Click 'Done' when finished.")

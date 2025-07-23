@@ -7,6 +7,9 @@ from matplotlib.widgets import Slider
 import sys
 from pathlib import Path
 import json
+import matplotlib
+
+matplotlib.use('Qt5Agg')
 
 # Add parent directory to the module search path
 sys.path.append(str(Path(__file__).resolve().parent.parent))

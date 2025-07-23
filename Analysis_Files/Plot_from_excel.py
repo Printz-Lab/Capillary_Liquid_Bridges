@@ -53,6 +53,10 @@ force_keys = [
     'right_top_force_circle',
     'left_bottom_force_circle',
     'right_bottom_force_circle'
+    # 'left_top_force',
+    # 'right_top_force',
+    # 'left_bottom_force',
+    # 'right_bottom_force'
 ]
 labels = [
     'Left Top',

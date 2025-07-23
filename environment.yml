@@ -466,7 +466,4 @@ dependencies:
   - zlib-ng=2.2.4=hbb528cf_0
   - zstandard=0.23.0=py311he736701_2
   - zstd=1.5.7=hbeecb71_2
-  - pip:
-      - originext==1.2.4
-      - originpro==1.1.12
-prefix: C:\Users\raglo\anaconda3\envs\PL_analysis
+

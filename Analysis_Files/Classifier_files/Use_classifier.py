@@ -8,6 +8,8 @@ import pandas as pd
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from tqdm import tqdm
+import sys
+sys.path.append(os.getcwd())
 
 cfg = json.load(open(r"Analysis_Files\config.json"))
 image_dir = Path(cfg["image_dir"])

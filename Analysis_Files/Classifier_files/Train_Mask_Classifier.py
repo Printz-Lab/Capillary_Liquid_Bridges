@@ -39,7 +39,7 @@ print("Label Classification Report:\n")
 y_label_pred = label_clf.predict(X_label_test)
 print(classification_report(y_label_test, y_label_pred))
 clf_path_dir = label_clf_path.parent
-label_clf_path = clf_path_dir / "mask_edge_classifier3.pkl"
+label_clf_path = clf_path_dir / "mask_edge_classifier4.pkl"
 joblib.dump(label_clf, label_clf_path)
 print(f"Edge classifier saved to {label_clf_path}")
 
@@ -59,13 +59,13 @@ print("Side Classification Report:\n")
 y_side_pred = side_clf.predict(X_side_test)
 print(classification_report(y_side_test, y_side_pred))
 side_clf_path_dir = side_clf_path.parent
-side_clf_path = side_clf_path_dir / "contour_side_classifier3.pkl"
+side_clf_path = side_clf_path_dir / "contour_side_classifier4pkl"
 joblib.dump(side_clf, side_clf_path)
 print(f"Side classifier saved to {side_clf_path}")
 
 # # --- Update config.json with new classifier paths ---
-# cfg["label_clf_path"] = label_clf_path
-# cfg["side_clf_path"] = side_clf_path
-# with open(r"Analysis_Files\config.json", "w") as f:
-#     json.dump(cfg, f, indent=4)
-# print("Updated config.json with new classifier paths.")
+cfg["label_clf_path"] = label_clf_path
+cfg["side_clf_path"] = side_clf_path
+with open(r"Analysis_Files\config.json", "w") as f:
+    json.dump(cfg, f, indent=4)
+print("Updated config.json with new classifier paths.")

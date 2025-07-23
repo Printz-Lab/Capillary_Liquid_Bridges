@@ -277,33 +277,12 @@ def contact_angle_at_index(points, index, side="left", label="top"):
 
 
 def find_contact_point_on_line_half(points, line_y, top_line, bottom_line, label, side="right", tolerance=20):
-    center_x = (top_line[0][0] + top_line[1][0]) / 2
-    plt.plot(points[:, 0], points[:, 1], 'o', markersize=2, label='Ellipse Points')
-    # plt.axvline(x=top_line[0][0], color='b', linestyle='--', label='Top Line X left')
-    # plt.axvline(x=bottom_line[0][0], color='y', linestyle='--', label='Bottom Line X left')
-    plt.scatter(top_line[0][0], top_line[0][1], color='r', label='Top Line Y right')
-    plt.scatter(bottom_line[0][0], bottom_line[0][1], color='g', label='Bottom Line Y right')
-    plt.scatter(top_line[1][0], top_line[1][1], color='b', label='Top Line Y left')
-    plt.scatter(bottom_line[1][0], bottom_line[1][1], color='y', label='Bottom Line Y left')
-    plt.title(f"Contact Point Search on {label} Line ({side} side)")
-    plt.legend()
-    plt.show()
+    # center_x = (top_line[0][0] + top_line[1][0]) / 2
+    center_x = points[:, 0].mean()
     if side == "right":
-        if label == "top":
-            center_x = top_line[0][0]
-            print(f"Right side, top line center x: {center_x}")
-        else:
-            center_x = bottom_line[0][0]
-            print(f"Right side, bottom line center x: {center_x}")
-        relevant_points = points[points[:, 0] > center_x]
-    else:
-        if label == "top":
-            center_x = top_line[1][0]
-            print(f"Left side, top line center x: {center_x}")
-        else:
-            center_x = bottom_line[1][0]
-            print(f"Left side, bottom line center x: {center_x}")
         relevant_points = points[points[:, 0] < center_x]
+    else:
+        relevant_points = points[points[:, 0] > center_x]
 
     dists = np.abs(relevant_points[:, 1] - line_y)
     close_indices = np.where(dists < tolerance)[0]
@@ -321,10 +300,16 @@ def extract_all_contact_angles(ellipse_left, ellipse_right, roi_y_top, roi_y_bot
     points_right = ellipse_to_points(ellipse_right[0], ellipse_right[1], ellipse_right[2])
     plt.plot(points_left[:, 0], points_left[:, 1], 'o', markersize=2, label='Left Ellipse Points')
     plt.plot(points_right[:, 0], points_right[:, 1], 'o', markersize=2, label='Right Ellipse Points')
+    # plt.scatter(top_line[1][0], top_line[1][1], color='r', label='Top Line Y right')
+    # plt.scatter(bottom_line[1][0], bottom_line[1][1], color='g', label='Bottom Line Y right')
+    # plt.scatter(top_line[0][0], top_line[0][1], color='b', label='Top Line Y left')
+    # plt.scatter(bottom_line[0][0], bottom_line[0][1], color='y', label='Bottom Line Y left')
+    # plt.axvline(points_left[:, 0].mean(), color='b', linestyle='--', label='Left Ellipse Mean Y')
+    # plt.axvline(points_right[:, 0].mean(), color='r', linestyle='--', label='Right Ellipse Mean Y')
     plt.axhline(y=roi_y_top, color='r', linestyle='--', label='ROI Top Line')
     plt.axhline(y=roi_y_bottom, color='g', linestyle='--', label='ROI Bottom Line')
-    plt.legend()
-    plt.show()
+
+
 
     left_result = {}
     right_result = {}
@@ -337,7 +322,14 @@ def extract_all_contact_angles(ellipse_left, ellipse_right, roi_y_top, roi_y_bot
             res = find_contact_point_on_line_half(points, line_y, top_line, bottom_line, label, side="left")
             if res is not None:
                 idx, pt, relevant_points = res
+                plt.plot(pt[0], pt[1], 'ro', markersize=5, label=f'Left {label} Contact Point')
                 ang = contact_angle_at_index(relevant_points, idx, "left", label)
+                if ang is not None:
+                    dx = np.cos(np.radians(-ang))
+                    dy = np.sin(np.radians(-ang))
+                    pt2 = pt + np.array([dx, dy]) * 10  # Offset point
+                    pt1 = pt - np.array([dx, dy]) * 10
+                    plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], 'g--', label=f'Left {label} Angle Line')
                 left_result[label] = {"point": pt, "angle_deg": ang}
             else:
                 left_result[label] = {"point": None, "angle_deg": None}
@@ -349,11 +341,20 @@ def extract_all_contact_angles(ellipse_left, ellipse_right, roi_y_top, roi_y_bot
             res = find_contact_point_on_line_half(points, line_y, top_line, bottom_line, label, side="right")
             if res is not None:
                 idx, pt, relevant_points = res
+                plt.plot(pt[0], pt[1], 'go', markersize=5, label=f'Right {label} Contact Point')
                 ang = contact_angle_at_index(relevant_points, idx, "right", label)
+                if ang is not None:
+                    dx = np.cos(np.radians(-ang))
+                    dy = np.sin(np.radians(-ang))
+                    pt2 = pt + np.array([dx, dy]) * 10  # Offset point
+                    pt1 = pt - np.array([dx, dy]) * 10
+                    plt.plot([pt1[0], pt2[0]], [pt1[1], pt2[1]], 'g--', label=f'Right {label} Angle Line')
                 right_result[label] = {"point": pt, "angle_deg": ang}
             else:
                 right_result[label] = {"point": None, "angle_deg": None}
-
+    plt.legend()
+    # plt.show()
+    plt.close()
     return left_result, right_result
 
 def get_meridonal_profile_new(points, contacts, side):
@@ -740,283 +741,4 @@ def draw_theoretical_curve(ax, bridge_type, a, b, origin, roi_coords, side):
 
 if __name__ == "__main__":
     # Hide the root Tk window
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    # Ask user to pick a folder
-    folder_path = filedialog.askdirectory(
-        title="Select folder containing droplet images"
-    )
-    if not folder_path:
-        print("No folder selected, exiting.")
-        exit()
-
-    # Gather image files
-    exts = (".jpg", ".jpeg", ".png", ".tif", ".bmp")
-    image_files = [
-        os.path.join(folder_path, f)
-        for f in os.listdir(folder_path)
-        if f.lower().endswith(exts)
-    ]
-
-    if not image_files:
-        print("No image files found.")
-        exit()
-
-    results = []
-
-    # Process images
-    for image_path in image_files:
-        print(f"\nProcessing {os.path.basename(image_path)}…")
-        result = process_droplet_two_lobes(image_path, roi_type="manual")
-        if not result:
-            continue
-
-        # Unpack results
-        ellipse_left, ellipse_right, (x_min, y_min, x_max, y_max), image, cropped = (
-            result
-        )
-        roi_height, roi_width = y_max - y_min, x_max - x_min
-
-        # Contact angle analysis
-        left_contacts = extract_all_contact_angles(
-            ellipse_left, 0, cropped.shape[0] - 1, "left"
-        )
-        right_contacts = extract_all_contact_angles(
-            ellipse_right, 0, cropped.shape[0] - 1, "right"
-        )
-
-        # Geometric analysis
-        origin, l_pt, r_pt, min_dist = compute_curve_distance(
-            ellipse_left, ellipse_right
-        )
-        if not origin:
-            print("Skipping distance calculations")
-            continue
-
-        data = {
-            "filename": os.path.basename(image_path),
-            "left_top_angle": None,
-            "left_top_Y": None,
-            "left_top_X": None,
-            "left_bottom_angle": None,
-            "left_bottom_Y": None,
-            "left_bottom_X": None,
-            "right_top_angle": None,
-            "right_top_Y": None,
-            "right_top_X": None,
-            "right_bottom_angle": None,
-            "right_bottom_Y": None,
-            "right_bottom_X": None,
-            "y": None,
-        }
-        Ystar = min_dist / 2 if min_dist else None
-        data["y"] = Ystar
-
-        # Process contact points and angles
-        def process_contacts(contacts, side, origin):
-            for pos in ["top", "bottom"]:
-                contact = contacts.get(pos, {})
-                if contact["point"] is not None and contact["angle_deg"] is not None:
-                    # Transform coordinates
-                    Xn, Yn = transform_point_to_frame(contact["point"], origin)
-                    # Store values with absolute angle
-                    data[f"{side}_{pos}_angle"] = abs(contact["angle_deg"])
-                    data[f"{side}_{pos}_Y"] = Yn
-                    data[f"{side}_{pos}_X"] = Xn
-
-        if origin:
-            process_contacts(left_contacts, "left", origin)
-            process_contacts(right_contacts, "right", origin)
-
-        results.append(data)
-
-        # Transform coordinates
-        pts_l = ellipse_to_points(*ellipse_left)
-        pts_r = ellipse_to_points(*ellipse_right)
-        # Xl, Yl = transform_points_to_new_frame(pts_l[:,0], pts_l[:,1], origin)
-        # Xr, Yr = transform_points_to_new_frame(pts_r[:,0], pts_r[:,1], origin)
-
-        # Generate debug visualization
-        debug_img = image.copy()
-
-        # Draw fitted ellipses on full image
-        if ellipse_left is not None:
-            (lx, ly), (lma, lmi), lang = ellipse_left
-            cv2.ellipse(
-                debug_img,
-                (int(lx + x_min), int(ly + y_min)),
-                (int(lma / 2), int(lmi / 2)),
-                lang,
-                0,
-                360,
-                (0, 0, 255),
-                2,
-            )
-
-        if ellipse_right is not None:
-            (rx, ry), (rma, rmi), rang = ellipse_right
-            cv2.ellipse(
-                debug_img,
-                (int(rx + x_min), int(ry + y_min)),
-                (int(rma / 2), int(rmi / 2)),
-                rang,
-                0,
-                360,
-                (255, 0, 0),
-                2,
-            )
-
-        # Draw coordinate axes
-        origin_full = (int(origin[0] + x_min), int(origin[1] + y_min))
-        cv2.line(
-            debug_img,
-            (origin_full[0], y_min),
-            (origin_full[0], y_max),
-            (0, 255, 255),
-            2,
-        )
-        cv2.line(
-            debug_img,
-            (x_min, origin_full[1]),
-            (x_max, origin_full[1]),
-            (0, 255, 255),
-            2,
-        )
-
-        # Draw contact points and angles
-        debug_img = draw_contact_angle_debug(
-            debug_img, left_contacts["top"], (x_min, y_min), (255, 0, 0), 0, "L-T: "
-        )
-        debug_img = draw_contact_angle_debug(
-            debug_img, left_contacts["bottom"], (x_min, y_min), (255, 0, 0), 0, "L-B: "
-        )
-        debug_img = draw_contact_angle_debug(
-            debug_img, right_contacts["top"], (x_min, y_min), (0, 255, 0), 0, "R-T: "
-        )
-        debug_img = draw_contact_angle_debug(
-            debug_img, right_contacts["bottom"], (x_min, y_min), (0, 255, 0), 0, "R-B: "
-        )
-
-        # Show results
-        plt.figure(figsize=(12, 8))
-        plt.imshow(cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB))
-        plt.title("Analysis Results - Fitted Ellipses and Contact Points")
-        plt.axis("off")
-        plt.show()
-
-        # Comprehensive printout
-        print(f"\n=== Results for {os.path.basename(image_path)} ===")
-        # transform contact points for below
-
-        # Contact points and angles
-        print("\nIntersection Points and Angles:")
-        for side, contacts in [("Left", left_contacts), ("Right", right_contacts)]:
-            for pos in ["Top", "Bottom"]:
-                contact = contacts[pos.lower()]
-                pt = contact["point"]
-                angle = contact["angle_deg"]
-
-                print(f"\n{side} {pos} Contact:")
-
-                # Handle coordinates
-                if pt is not None:
-                    try:
-                        x_roi, y_roi = pt  # Explicit unpacking
-                        Xn, Yn = transform_point_to_frame((x_roi, y_roi), origin)
-
-                        # print(f"  Image Coordinates: ({x_roi+x_min:.1f}, {y_roi+y_min:.1f})")
-                        print(f"  Transformed System: (X={Xn:.1f}, Y={Yn:.1f})")
-
-                    except (ValueError, TypeError) as e:
-                        print(f"  Transformation error: {str(e)}")
-
-                if angle is not None:
-                    absangle = abs(angle)
-                    print(f"  Angle: {absangle:+.1f}°")
-                else:
-                    print("  Angle: Could not be calculated")
-
-        print("\nGeometric Analysis:")
-        print(f"Y* (neck width): {Ystar:.2f} px")
-        print(f"Image origin: ({origin_full[0]:.1f}, {origin_full[1]:.1f})")
-
-        ###############################################################################################################################
-
-        # Solve for a and b using both contact points' equations
-
-        # Known values from image analysis (using absolute values for angles)
-        y = data["y"]
-        side = "right"  # Try with left side first
-        yc1 = data[f"{side}_top_Y"]
-        yc2 = data[f"{side}_bottom_Y"]
-        theta1 = np.deg2rad(
-            abs(data[f"{side}_top_angle"])
-        )  # Absolute value for angle direction
-        theta2 = np.deg2rad(abs(data[f"{side}_bottom_angle"]))
-
-        # After contact angle calculation
-        bridge_type = classify_bridge(
-            y, yc1, yc2, np.radians(theta1), np.radians(theta2)
-        )
-        a, b = calculate_parameters(
-            bridge_type, y, yc1, yc2, np.radians(theta1), np.radians(theta2)
-        )
-
-        # Get experimental points for error calculation
-        pts_experimental = np.vstack([pts_l, pts_r])
-
-        # Enhanced visualization
-        # In your main processing loop:
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-
-        # Store all plottable artists
-        # In your main processing loop:
-        # In your plotting section:
-        artists = []
-        theory_line = draw_theoretical_curve(
-            ax, bridge_type, a, b, origin, (x_min, y_min, x_max, y_max)
-        )
-
-        if theory_line is not None:
-            # Add theoretical curve
-            theory_line = ax.plot(
-                theory_line[1],
-                theory_line[0],
-                c="red",
-                lw=2,
-                label=f"Theoretical {bridge_type.capitalize()}",
-            )
-            artists.append(theory_line[0])
-
-        # Add experimental points
-        exp_points = ax.scatter(
-            pts_experimental[:, 0],
-            pts_experimental[:, 1],
-            c="blue",
-            s=10,
-            label="Experimental",
-            alpha=0.5,
-        )
-        artists.append(exp_points)
-
-        # Create legend only if we have entries
-        if artists:
-            ax.legend(handles=artists)
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                "No Valid Theoretical Curve",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-
-        plt.show()
-        # After parameter calculation
-        print(f"Bridge type: {bridge_type}")
-        print(f"Parameters: a={a:.2f}, b={b:.2f}")
-        print(f"ROI coords: x={x_min}-{x_max}, y={y_min}-{y_max}")
-        print(f"Origin point: {origin_full}")
+    print("Run the other file!")

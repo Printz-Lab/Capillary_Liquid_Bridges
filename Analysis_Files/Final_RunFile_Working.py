@@ -86,11 +86,12 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         if feat:
             features.append(feat)
             valid_indices.append(i)
-
+    print(f"Valid indices: {valid_indices}")
     if not features:
         return None
 
     import pandas as pd
+    from matplotlib import cm
 
     X_pred = pd.DataFrame(
         features,
@@ -149,7 +150,7 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
 
     origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
 
-    width = (top_line[1][0] - top_line[0][0]) / 2 +20
+    width = (top_line[1][0] - top_line[0][0]) / 2 +15
     x_min_left = origin[0] - width
     x_max_left = origin[0]
     x_min_right = origin[0]
@@ -210,6 +211,7 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
     results["contour_left"] = contour_left
     results["contour_right"] = contour_right
 
+    plt.figure(figsize=(10, 6))
     for side, ellipse, contacts, contour in [
         ("left", ellipse_left, left_contacts, contour_left),
         ("right", ellipse_right, right_contacts, contour_right),
@@ -229,7 +231,7 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         meridonal_contour = get_meridonal_profile_new(
             profile_pts_contour, contacts, side
         )
-        plt.figure(figsize=(10, 6))
+
         plt.plot(meridonal[:, 0], meridonal[:, 1], label=f'Meridonal Profile {side}')
         plt.plot(
             meridonal_contour[:, 0],
@@ -247,19 +249,25 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         y_interp_bottom = np.linspace(bottom_line[1][1], bottom_line[0][1], num_interp)
         interp_points_bottom = np.stack([x_interp_bottom, y_interp_bottom], axis=-1)
 
-        # Only plot points near the contour
-        contour_xy = profile_pts_contour
-        distances_top = np.min(np.linalg.norm(contour_xy[None, :, :] - interp_points_top[:, None, :], axis=-1), axis=1)
-        threshold = 15  # pixels, adjust as needed
-        near_mask_top = distances_top < threshold
-        plt.plot(interp_points_top[near_mask_top, 0], interp_points_top[near_mask_top, 1], color='purple')
+        # Plot the substrate lines
+        # Use a gradient color for each point along the substrate lines
+        colors_top = cm.viridis(np.linspace(0, 1, num_interp))
+        colors_bottom = cm.viridis(np.linspace(0, 1, num_interp))
+        for i in range(num_interp - 1):
+            plt.plot(
+            interp_points_top[i : i + 2, 0],
+            interp_points_top[i : i + 2, 1],
+            color=colors_top[i],
+            linewidth=2,
+            )
+            plt.plot(
+            interp_points_bottom[i : i + 2, 0],
+            interp_points_bottom[i : i + 2, 1],
+            color=colors_bottom[i],
+            linewidth=2,
+            )
+        
 
-        distances_bottom = np.min(np.linalg.norm(contour_xy[None, :, :] - interp_points_bottom[:, None, :], axis=-1), axis=1)
-        threshold = 15  # pixels, adjust as needed
-        near_mask_bottom = distances_bottom < threshold
-        plt.plot(interp_points_bottom[near_mask_bottom, 0], interp_points_bottom[near_mask_bottom, 1], color='purple')
-        # plt.plot(top_line[:, 0], top_line[:, 1], label='Top Line', color='blue')
-        # plt.plot(bottom_line[:, 0], bottom_line[:, 1], label='Bottom Line', color='orange')
         plt.title(f'Meridonal Profile for {side} Side')
         plt.xlabel('X')
         plt.ylabel('Y')

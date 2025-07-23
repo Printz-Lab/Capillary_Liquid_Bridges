@@ -6,11 +6,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 import matplotlib
-
+import sys
 matplotlib.use("TkAgg")  # Enables interactive window for key press detection
-
+sys.path.append(os.getcwd())
 # CONFIGURATION
-cfg = json.load(open(r"C:\Users\Aj\Documents\GitHub\Capillary_Liquid_Bridges\Analysis_Files\config.json"))
+cfg = json.load(open(r"Analysis_Files\config.json"))
 image_dir = Path(cfg["image_dir"])
 mask_dir  = Path(cfg["mask_dir"])
 output_dir = Path(cfg["output_dir"])

@@ -1,5 +1,6 @@
 import os
 import json
+from json import JSONDecodeError
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,7 +9,11 @@ import pandas as pd
 import matplotlib
 
 matplotlib.use("TkAgg")  # Enables interactive window for key press detection
-cfg = json.load(open(r"C:\Users\Aj\Documents\GitHub\Capillary_Liquid_Bridges\Analysis_Files\config.json"))
+import sys
+# CONFIGURATION
+sys.path.append(os.getcwd())
+
+cfg = json.load(open(r"Analysis_Files\config.json"))
 image_dir = Path(cfg["image_dir"])
 mask_dir  = Path(cfg["mask_dir"])
 output_dir = Path(cfg["output_dir"])
@@ -95,9 +100,12 @@ for image_path in image_paths:
     if scale < 1:
         image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-    with open(json_path, "r") as f:
-        print(f"Processing {image_path.name} with {json_path.name}")
-        masks = json.load(f)
+    try:
+        with open(json_path, "r") as f:
+            masks = json.load(f)
+    except JSONDecodeError as e:
+        print(f"⚠️  Skipping {json_path.name}: JSON decode error at {e.pos} – {e.msg}")
+        continue
 
     for idx, mask in enumerate(masks):
         features = extract_features(mask, image.shape)
