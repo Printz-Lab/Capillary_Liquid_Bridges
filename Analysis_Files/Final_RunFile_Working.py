@@ -529,7 +529,7 @@ def process_single_frame(args):
 if __name__ == "__main__":
     # %% Example use on first frame
     image_paths = sorted(image_dir.glob("*.tif")) or sorted(image_dir.glob("*.png"))
-    frame_number = 5  # Change this to process a different frame
+    frame_number = 62  # Change this to process a different frame
     json_path = mask_dir / f"{image_paths[frame_number].stem}_masks.json"
     print(json_path)
     with open(json_path, "r") as f:

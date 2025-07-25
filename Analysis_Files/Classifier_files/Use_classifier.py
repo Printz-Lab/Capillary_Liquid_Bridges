@@ -55,6 +55,8 @@ if __name__ == "__main__":
 )
     print(f"Found {len(image_paths)} images to process.")
     for idx, image_path in enumerate(tqdm(image_paths)):
+        if idx % 5 != 0:
+            continue
         json_path = Path(mask_dir) / f"{image_path.stem}_masks.json"
         if not json_path.exists():
             continue

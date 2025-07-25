@@ -45,3 +45,5 @@ if __name__ == "__main__":
         title="Select Output Directory"
     )
     extract_frames(video_file, output_dir)
+
+    

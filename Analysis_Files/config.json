@@ -1,13 +1,12 @@
 {
-    "image_dir": "E:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromoSilane_glassone_dynamic",
-    "mask_dir": "E:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromoSilane_glassone_dynamic\\masks_json",
-    "output_dir": "E:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromoSilane_glassone_dynamic\\Output",
-    "lines_file": "E:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromoSilane_glassone_dynamic\\Output\\Alannah_S1_substrates.npz",
-    "label_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\mask_edge_classifier4.pkl",
-    "side_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\contour_side_classifier4.pkl",
+    "image_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminopropyl_07.22_Trial3_VidImages",
+    "mask_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminopropyl_07.22_Trial3_VidImages\\masks_json",
+    "output_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminopropyl_07.22_Trial3_VidImages\\Output_Trial3",
+    "lines_file": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminopropyl_07.22_Trial3_VidImages\\Output_Trial3\\Alannah_S1_substrates.npz",
+    "label_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\mask_edge_classifier6.pkl",
+    "side_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\contour_side_classifier6.pkl",
     "excel_output": "Alannah_S1_training.xlsx",
-    "debug_image_dir": "E:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3bromoSilane_glassone_dynamic\\Output\\debug_images",
+    "debug_image_dir": "D:\\Capillary_bridging_data_alannah\\Silane Capillary Action\\3aminopropyl_07.22_Trial3_VidImages\\Output_Trial3\\debug_images",
     "first_frame_spacing": 5e-05,
     "sigma_surface_tension": 72
-
-    }
+}
