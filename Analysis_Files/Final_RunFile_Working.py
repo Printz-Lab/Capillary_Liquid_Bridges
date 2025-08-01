@@ -27,6 +27,7 @@ from cv2ellipse import (
     draw_contact_angle_debug,
     compute_curve_distance,
     fit_circle_to_contour_near_y,
+    fit_poly_and_get_angle,
 )
 import json 
 
@@ -69,7 +70,7 @@ pixel_to_meter = first_frame_spacing / np.linalg.norm(
 
 
 # %% Main function for processing a frame
-def process_frame_with_ellipses(img, masks, bottom_line, top_line):
+def process_frame_with_ellipses(img, masks, bottom_line, top_line, image_path):
     results = {}
 
     h, w = img.shape[:2]
@@ -86,7 +87,7 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         if feat:
             features.append(feat)
             valid_indices.append(i)
-    print(f"Valid indices: {valid_indices}")
+    # print(f"Valid indices: {valid_indices}")
     if not features:
         return None
 
@@ -115,15 +116,30 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
             left_mask = mask
         elif side == "r":
             right_mask = mask
-
     def get_contour(mask, x_min, x_max):
         binary = np.array(mask["segmentation"]).astype(np.uint8)
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        contour = max(contours, key=cv2.contourArea) if contours else None
-        contour = contour.reshape(-1, 2)
-        mask = (contour[:, 0] > x_min+5) & (contour[:, 0] < x_max-5)
-        cropped = contour[mask]
-        return cropped.reshape(-1, 1, 2) if len(cropped) > 0 else None
+        # print(f"Contours found: {len(.contours)}")
+
+        best_contour = None
+        max_area = 0
+
+        for cnt in contours:
+            cnt = cnt.reshape(-1, 2)
+            # Filter to points within desired x-range
+            filtered = cnt[(cnt[:, 0] > x_min) & (cnt[:, 0] < x_max)]
+
+            if len(filtered) >= 5:  # Require minimum points for fitting later
+                area = cv2.contourArea(filtered.reshape(-1, 1, 2))
+                if area > max_area:
+                    max_area = area
+                    best_contour = filtered
+
+        if best_contour is not None and len(best_contour) > 0:
+            return best_contour.reshape(-1, 1, 2)
+        else:
+            print("⚠️ No valid contour found in x-range.")
+            return None
 
     x_min_left = min(int(bottom_line[0][0]), int(top_line[0][0]))-2
     x_max_left = np.mean([int(bottom_line[0][0]), int(bottom_line[1][0])])
@@ -140,21 +156,19 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
         if right_mask
         else None
     )
-
-    ellipse_left = (
-        fit_ellipse_to_contour(contour_left) if contour_left is not None else None
-    )
-    ellipse_right = (
-        fit_ellipse_to_contour(contour_right) if contour_right is not None else None
-    )
-
-    origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
-
-    width = (top_line[1][0] - top_line[0][0]) / 2 +15
+    if contour_left is None or contour_right is None:
+        print("Skipping frame due to missing contours.")
+        return None
+   
+    
+    origin, l_pt, r_pt, min_dist = compute_curve_distance(contour_left, contour_right)
+    width = (top_line[1][0] - top_line[0][0]) / 2  + 10
     x_min_left = origin[0] - width
     x_max_left = origin[0]
     x_min_right = origin[0]
     x_max_right = origin[0] + width
+
+   
 
     contour_left = (
         get_contour(left_mask, x_min=x_min_left, x_max=x_max_left)
@@ -177,6 +191,44 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
     if ellipse_left is None or ellipse_right is None:
         print("Skipping frame due to missing ellipses.")
         return None
+    
+     # # Plot contours on the image for debugging
+    # debug_img = img.copy()
+    # if contour_left is not None:
+    #     cv2.polylines(
+    #         debug_img,
+    #         [contour_left],
+    #         isClosed=False,
+    #         color=(0, 255, 0),
+    #         thickness=2,
+    #     )
+    # if contour_right is not None:
+    #     cv2.polylines(
+    #         debug_img,
+    #         [contour_right],
+    #         isClosed=False,
+    #         color=(255, 0, 0),
+    #         thickness=2,
+    #     )
+    # #  Plot masks used (left and right) on the debug image
+    # mask_overlay = debug_img.copy()
+    # for mask, color in zip([left_mask, right_mask], [(0, 255, 0), (255, 0, 0)]):  # green for left, red for right
+    #     if mask is not None:
+    #         binary = np.array(mask["segmentation"]).astype(np.uint8)
+    #         mask_overlay[binary > 0] = (
+    #             mask_overlay[binary > 0] * 0.7 + np.array(color) * 0.3
+    #         ).astype(np.uint8)
+    # debug_img = mask_overlay
+    # plt.figure(figsize=(10, 6))
+    # plt.axvline(x=x_min_left, color='green', linestyle='--', label='Left Min X')
+    # plt.scatter(origin[0], origin[1], color='black', s=50, label='Origin')
+    # plt.axvline(x=x_max_left, color='green', linestyle=':', label='Left Max X')
+    # plt.axvline(x=x_min_right, color='red', linestyle='--', label='Right Min X')
+    # plt.axvline(x=x_max_right, color='red', linestyle=':', label='Right Max X')
+    # plt.imshow(cv2.cvtColor(debug_img, cv2.COLOR_BGR2RGB))
+    # plt.title("Contours Used for Ellipse Fitting (Debug)")
+    # plt.axis("off")
+    # plt.show()
 
     y_top = int((top_line[0][1] + top_line[1][1]) / 2)
     y_bot = int((bottom_line[0][1] + bottom_line[1][1]) / 2)
@@ -185,10 +237,42 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
     separation_m = separation_px * pixel_to_meter
     results["plate_separation_m"] = separation_m
 
-    left_contacts, right_contacts = extract_all_contact_angles(ellipse_left, ellipse_right, y_top, y_bot, top_line, bottom_line)
+    # left_contacts, right_contacts = extract_all_contact_angles(ellipse_left, ellipse_right, y_top, y_bot, top_line, bottom_line)
     # right_contacts = extract_all_contact_angles(ellipse_right, y_top, y_bot, top_line, bottom_line, "right")
+    left_contacts = {}
+    right_contacts = {}
+    debug_mode = True  # Set to True to visualize fitting process
+    fig, ax = plt.subplots(figsize=(10, 6))
+    plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    debug_out = Path(debug_dir) / 'poly' / f"debug_{image_path.stem}poly.png" if debug_mode else None
+    if not debug_out.parent.exists():
+        debug_out.parent.mkdir(parents=True, exist_ok=True)
+    for label, y_val in [('top', y_top), ('bottom', y_bot)]:
+        for side, contour in [('left', contour_left), ('right', contour_right)]:
+            # print(f"Processing {side} side for {label} line at y={y_val}")
 
-    origin, l_pt, r_pt, min_dist = compute_curve_distance(ellipse_left, ellipse_right)
+            angle, pt, poly = fit_poly_and_get_angle(
+            contour,
+            y_val,
+            side=side,
+            degree=3,
+            window=200,
+            debug_image=img if debug_mode else None,
+            label=label,
+        )
+            
+
+            contact_dict = {'point': pt, 'angle_deg': angle, 'poly': poly}
+            if side == "left":
+                left_contacts[label] = contact_dict
+            else:
+                right_contacts[label] = contact_dict
+    if debug_mode:
+        plt.savefig(debug_out)
+        plt.close()
+        # plt.show()
+
+    origin, l_pt, r_pt, min_dist = compute_curve_distance(contour_left, contour_right)
 
     y0 = origin[1]
     center_l, R2_left = fit_circle_to_contour_near_y(contour_left, y0)
@@ -281,7 +365,7 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
             dx = top_line[1][0] - top_line[0][0]
             dy = top_line[1][1] - top_line[0][1]
             top_angle = np.degrees(np.arctan2(dy, dx))
-            print(f"Bottom angle: {bottom_angle}, Top angle: {top_angle}")
+            # print(f"Bottom angle: {bottom_angle}, Top angle: {top_angle}")
             return (bottom_angle + top_angle) / 2
         
         Subst_Angle = angle_of_substrate(top_line, bottom_line)
@@ -292,7 +376,7 @@ def process_frame_with_ellipses(img, masks, bottom_line, top_line):
             meridonal_contour[:, 0], meridonal_contour[:, 1], origin, Subst_Angle
         )
         R2 = results.get(f"circle_radius_R2_{side}", None)
-        print(f"R2 for {side}: {R2}")
+        # print(f"R2 for {side}: {R2}")
         # plt.figure(figsize=(10, 6))
         # plt.plot(shifted[0], shifted[1], label=f'Meridonal Profile {side}')
         # plt.title(f'Meridonal Profile for {side} Side')
@@ -410,20 +494,20 @@ def visualize_frame_debug(
     cv2.line(img_debug, bottom_line[0], bottom_line[1], (255, 255, 0), 2)
     cv2.line(img_debug, top_line[0], top_line[1], (255, 0, 0), 2)
 
-    # Draw fitted ellipses
-    for ellipse, color in [(ellipse_left, (0, 0, 255)), (ellipse_right, (0, 255, 0))]:
-        if ellipse:
-            (xc, yc), (MA, ma), angle = ellipse
-            cv2.ellipse(
-                img_debug,
-                (int(xc), int(yc)),
-                (int(MA // 2), int(ma // 2)),
-                angle,
-                0,
-                360,
-                color,
-                2,
-            )
+    # # Draw fitted ellipses
+    # for ellipse, color in [(ellipse_left, (0, 0, 255)), (ellipse_right, (0, 255, 0))]:
+    #     if ellipse:
+    #         (xc, yc), (MA, ma), angle = ellipse
+    #         cv2.ellipse(
+    #             img_debug,
+    #             (int(xc), int(yc)),
+    #             (int(MA // 2), int(ma // 2)),
+    #             angle,
+    #             0,
+    #             360,
+    #             color,
+    #             2,
+    #         )
 
     for center, radius, color in [
         (
@@ -495,7 +579,7 @@ def process_single_frame(args):
         bottom_line = bottom_lines[idx]
 
         result, left_mask, right_mask = process_frame_with_ellipses(
-            img, masks, bottom_line, top_line
+            img, masks, bottom_line, top_line, image_path
         )
 
         # Optional: Save debug frame
@@ -529,7 +613,7 @@ def process_single_frame(args):
 if __name__ == "__main__":
     # %% Example use on first frame
     image_paths = sorted(image_dir.glob("*.tif")) or sorted(image_dir.glob("*.png"))
-    frame_number = 62  # Change this to process a different frame
+    frame_number = 100  # Change this to process a different frame
     json_path = mask_dir / f"{image_paths[frame_number].stem}_masks.json"
     print(json_path)
     with open(json_path, "r") as f:
@@ -540,7 +624,7 @@ if __name__ == "__main__":
     top_line = top_lines[frame_number]
 
     frame_result, left_mask, right_mask = process_frame_with_ellipses(
-        img, masks, bottom_line, top_line
+        img, masks, bottom_line, top_line, image_paths[frame_number]
     )
     plt.show()
     if frame_result:

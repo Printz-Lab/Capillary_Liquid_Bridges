@@ -85,7 +85,9 @@ image_paths = sorted(
     list(Path(image_dir).glob("*.tif")) + list(Path(image_dir).glob("*.png"))
 )
 
-for image_path in image_paths:
+for i, image_path in enumerate(image_paths):
+    if not i%5 == 0:
+        continue
     json_path = Path(mask_dir) / (image_path.stem + "_masks.json")
     if not json_path.exists():
         print(f"No mask file for {image_path.name}")

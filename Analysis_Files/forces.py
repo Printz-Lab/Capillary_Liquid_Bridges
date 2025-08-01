@@ -13,11 +13,10 @@ def calculate_force(H, y, theta, pixel_to_meter, sigma= 72):
     """
     y_m = y * pixel_to_meter
     H_m = np.abs(H / pixel_to_meter)
-    print(theta)
     theta = np.radians(theta)  # Convert angle to radians if needed
     angle_portion = -2 * np.pi * sigma * y_m * np.sin(theta) * 1e3
     curvature_portion = -2 * np.pi * sigma *(H_m / 2) * y_m**2 * 1e3
-    print(f"Mean Curvature -- Angle portion: {angle_portion}, Curvature portion: {curvature_portion}")
+    # print(f"Mean Curvature -- Angle portion: {angle_portion}, Curvature portion: {curvature_portion}")
     return angle_portion - curvature_portion
 
 def get_H_from_nodoid_or_unduloid(a, bridge_type):
@@ -110,7 +109,7 @@ def calculate_total_force_with_circle_model(contact_pt, origin, angle_deg, R2_px
     delta_P = gamma * (1 / R1 + 1 / R2)
     Fl = 2 * np.pi * R * gamma * np.sin(theta)
     Fp = -np.pi * R**2 * delta_P
-    print(f"circle model -- Fl: {Fl*1e3}, Fp: {Fp*1e3}")
+    # print(f"circle model -- Fl: {Fl*1e3}, Fp: {Fp*1e3}")
     F_total = Fl + Fp
 
     return F_total * 1e3  # μN

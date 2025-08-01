@@ -8,6 +8,8 @@ import pandas as pd
 from scipy.integrate import quad
 import matplotlib as mpl
 import matplotlib.lines as mlines
+from scipy.spatial import distance
+
 
 
 def select_roi(image):
@@ -272,7 +274,7 @@ def contact_angle_at_index(points, index, side="left", label="top"):
     # Flip convention for left side
     if side == "left" and label == "top" or side == "right" and label == "bottom":
         angle_deg = -angle_deg
-    print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
+    # print(f"Contact angle at index {index} ({label}): {angle_deg:.2f} degrees")
     return angle_deg
 
 
@@ -296,16 +298,17 @@ def extract_all_contact_angles(ellipse_left, ellipse_right, roi_y_top, roi_y_bot
     if ellipse_left is None or ellipse_right is None:
         return {}, {}
 
+    plt.figure()
     points_left = ellipse_to_points(ellipse_left[0], ellipse_left[1], ellipse_left[2])
     points_right = ellipse_to_points(ellipse_right[0], ellipse_right[1], ellipse_right[2])
     plt.plot(points_left[:, 0], points_left[:, 1], 'o', markersize=2, label='Left Ellipse Points')
     plt.plot(points_right[:, 0], points_right[:, 1], 'o', markersize=2, label='Right Ellipse Points')
-    # plt.scatter(top_line[1][0], top_line[1][1], color='r', label='Top Line Y right')
-    # plt.scatter(bottom_line[1][0], bottom_line[1][1], color='g', label='Bottom Line Y right')
-    # plt.scatter(top_line[0][0], top_line[0][1], color='b', label='Top Line Y left')
-    # plt.scatter(bottom_line[0][0], bottom_line[0][1], color='y', label='Bottom Line Y left')
-    # plt.axvline(points_left[:, 0].mean(), color='b', linestyle='--', label='Left Ellipse Mean Y')
-    # plt.axvline(points_right[:, 0].mean(), color='r', linestyle='--', label='Right Ellipse Mean Y')
+    plt.scatter(top_line[1][0], top_line[1][1], color='r', label='Top Line Y right')
+    plt.scatter(bottom_line[1][0], bottom_line[1][1], color='g', label='Bottom Line Y right')
+    plt.scatter(top_line[0][0], top_line[0][1], color='b', label='Top Line Y left')
+    plt.scatter(bottom_line[0][0], bottom_line[0][1], color='y', label='Bottom Line Y left')
+    plt.axvline(points_left[:, 0].mean(), color='b', linestyle='--', label='Left Ellipse Mean Y')
+    plt.axvline(points_right[:, 0].mean(), color='r', linestyle='--', label='Right Ellipse Mean Y')
     plt.axhline(y=roi_y_top, color='r', linestyle='--', label='ROI Top Line')
     plt.axhline(y=roi_y_bottom, color='g', linestyle='--', label='ROI Bottom Line')
 
@@ -519,34 +522,105 @@ def draw_debug_overlay(
     plt.axis("off")
     plt.show()
 
+import numpy as np
+import matplotlib.pyplot as plt
+from numpy.polynomial import Polynomial
 
-def compute_curve_distance(ellipse_left, ellipse_right, num_samples=500):
-    # Generate points for both ellipses
-    pts_l = ellipse_to_points(*ellipse_left)
-    pts_r = ellipse_to_points(*ellipse_right)
+def fit_poly_and_get_angle(contour, y_contact, side, degree=4, window=200, debug_image=None, label="top"):
+    """
+    Fit polynomial to a contour segment near y_contact, return tangent angle and contact point.
+    Optionally overlay on image for debugging.
+    """
+    if contour is None or len(contour) < degree + 1:
+        return None, None
 
-    # Find pair of closest points between the curves
-    min_dist = float("inf")
-    closest_pair = None
+    contour = contour.reshape(-1, 2)
+    distances = np.abs(contour[:, 1] - y_contact)
+    sorted_indices = np.argsort(distances)
+    nearest_points = contour[sorted_indices[:window]]
 
-    # Brute-force search for closest points (optimize this if needed)
-    for pl in pts_l:
-        for pr in pts_r:
-            dx = pl[0] - pr[0]
-            dy = pl[1] - pr[1]
-            dist = dx * dx + dy * dy  # Squared distance for efficiency
-            if dist < min_dist:
-                min_dist = dist
-                closest_pair = (pl, pr)
+    y = nearest_points[:, 0]
+    x = nearest_points[:, 1]
 
-    if closest_pair is None:
-        return None, None, None, None
+    if np.ptp(x) < 5:  # prevent poor fits
+        return None, None
 
-    # Set origin as midpoint between closest points
-    left_pt, right_pt = closest_pair
-    origin = ((left_pt[0] + right_pt[0]) / 2, (left_pt[1] + right_pt[1]) / 2)
+    # Fit polynomial y(x)
+    p = Polynomial.fit(x, y, degree).convert()
+    dp = p.deriv()
 
-    return origin, left_pt, right_pt, np.sqrt(min_dist)
+    x_fit = np.linspace(min(x)-100, max(x)+100, 500)
+    y_fit = p(x_fit)
+
+    # Compute angle from slope at the x of closest point
+    distances = np.abs(x_fit - y_contact)
+    idx_min = np.argmin(distances)
+    x_contact = y_fit[idx_min]
+    xx_contact = x_fit[idx_min]
+    dxdy = dp(xx_contact)
+    dydx= 1 / dxdy if dxdy != 0 else np.inf  # Avoid division by zero
+    angle_rad = np.arctan(np.abs(dydx))
+    angle_deg = np.degrees(angle_rad)
+
+    if side == "left" and label == "top" or side == "right" and label == "bottom":
+        angle_deg = -angle_deg
+
+    # Optional debug plot
+    if debug_image is not None:
+        
+        
+        plt.plot(contour[:, 0], contour[:, 1], 'g.', alpha=0.2, label=f"{side} contour", markersize=1)
+        plt.plot(y_fit, x_fit, 'r-', label=f"{side} poly fit")
+        plt.scatter([x_contact], [y_contact], c='cyan', label=f"{side} contact point")
+        plt.title(f"{side.capitalize()} {label} Polynomial Fit & Contact Angle: {angle_deg:.1f}°")
+        plt.gca().invert_yaxis()
+        plt.legend()
+        plt.tight_layout()
+
+    contact_point = np.array([x_contact, y_contact])
+    return angle_deg, contact_point, p
+
+
+def compute_curve_distance(contour_left, contour_right, top_k=15):
+    contour_left = contour_left.reshape(-1, 2)
+    contour_right = contour_right.reshape(-1, 2)
+
+    # Compute full distance matrix between all points
+    dists = distance.cdist(contour_left, contour_right)  # shape (N, M)
+    pairs = []
+
+    # Find the indices of the top_k smallest distances
+    flat_indices = np.argpartition(dists.flatten(), top_k)[:top_k]
+    rows, cols = np.unravel_index(flat_indices, dists.shape)
+
+    for i in range(len(rows)):
+        pt_l = contour_left[rows[i]]
+        pt_r = contour_right[cols[i]]
+        pairs.append((pt_l, pt_r))
+
+    # Average midpoints of top_k closest pairs
+    midpoints = np.array([(pl + pr) / 2 for pl, pr in pairs])
+    origin = np.mean(midpoints, axis=0)
+
+    # Also return avg of left/right points (optional)
+    left_pt = np.mean([pl for pl, _ in pairs], axis=0)
+    right_pt = np.mean([pr for _, pr in pairs], axis=0)
+    mean_dist = np.mean([np.linalg.norm(pl - pr) for pl, pr in pairs])
+
+    # # Debug plot
+    # plt.figure(figsize=(10, 6))
+    # plt.plot(contour_left[:, 0], contour_left[:, 1], 'b.', markersize=1, label='Left Contour')
+    # plt.plot(contour_right[:, 0], contour_right[:, 1], 'r.', markersize=1, label='Right Contour')
+    # plt.plot(origin[0], origin[1], 'go', markersize=6, label='Averaged Origin')
+    # for pl, pr in pairs:
+    #     plt.plot([pl[0], pr[0]], [pl[1], pr[1]], 'k-', alpha=0.2)  # connecting lines
+    # plt.title(f"Average of {top_k} Closest Point Pairs")
+    # plt.gca().invert_yaxis()
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
+
+    return origin, left_pt, right_pt, mean_dist
 
 
 def transform_points_to_new_frame(xs, ys, origin, angle_deg=0):
