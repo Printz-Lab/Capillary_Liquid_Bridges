@@ -86,7 +86,7 @@ image_paths = sorted(
 )
 
 for i, image_path in enumerate(image_paths):
-    if not i%5 == 0:
+    if not i%7 == 0:
         continue
     json_path = Path(mask_dir) / (image_path.stem + "_masks.json")
     if not json_path.exists():

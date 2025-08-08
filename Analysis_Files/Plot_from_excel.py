@@ -74,7 +74,7 @@ df = pd.merge(df_forces, df_sep[["frame", "plate_separation"]], on="frame")
 df = df[df["frame"] >= 5].reset_index(drop=True)
 df[force_keys] = df[force_keys].apply(pd.to_numeric, errors="coerce")
 df["average_force"] = df[force_keys].mean(axis=1)
-df["plate_separation_um"] = df["plate_separation"] * 1e3
+df["plate_separation_um"] = df["plate_separation"] * 1e6
 
 # --- Compute Segments ---
 sep = df["plate_separation"].values
@@ -134,6 +134,7 @@ for seg_id in range(n_segments):
 plt.xlabel("Plate Separation (μm)")
 plt.ylabel("Force (μN)")
 # plt.title("Capillary Bridge Forces vs Plate Separation")
+plt.ylim(0, df["average_force"].mean() * 3)
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
