@@ -1,0 +1,12 @@
+{
+    "image_dir": "C:\\Users\\raglo\\OneDrive - University of Arizona\\Printz Lab\\Data\\Capillary_Bridges\\My_better_CLB_videos\\5-9\\s1_tifs",
+    "mask_dir": "C:\\Users\\raglo\\OneDrive - University of Arizona\\Printz Lab\\Data\\Capillary_Bridges\\masks_json",
+    "output_dir": "C:\\Users\\raglo\\OneDrive - University of Arizona\\Printz Lab\\Data\\Capillary_Bridges\\My_better_CLB_videos\\5-9\\s1_tifs\\output",
+    "lines_file": "C:\\Users\\raglo\\OneDrive - University of Arizona\\Printz Lab\\Data\\Capillary_Bridges\\My_better_CLB_videos\\5-9\\s1_tifs\\output\\Alannah_S1_substrates.npz",
+    "label_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\mask_edge_trial1_dynamic.pkl",
+    "side_clf_path": "Analysis_Files\\Classifier_files\\trained_classifiers\\contour_side_trial1_dynamic.pkl",
+    "excel_output": "Alannah_S1_training.xlsx",
+    "debug_image_dir": "C:\\Users\\raglo\\OneDrive - University of Arizona\\Printz Lab\\Data\\Capillary_Bridges\\My_better_CLB_videos\\5-9\\s1_tifs\\output\\debug_images",
+    "first_frame_spacing": 0.0001,
+    "sigma_surface_tension": 72
+}
